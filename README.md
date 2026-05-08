@@ -153,14 +153,3 @@ python scripts/fund_data_demo.py
 3. **环境选择**：纯 Python 用 `env='prd'`，Quant 平台用 `env='qa'`
 4. **日期格式**：统一使用 `YYYYMMDD` 格式（如 `20240101`）
 5. **错误处理**：token 无效、无权限、空结果等均有对应处理策略（见 SKILL.md）
-
-## 相关链接
-
-- 官方 Tushare Pro 文档：https://tushare.pro/document/2
-- 山西证券接口文档：http://221.204.19.233:7173/document/2
-
-## 更新日志
-
-- **2026-05-08**：优化 SKILL.md 至 320 行，添加 Progressive Disclosure
-- **2026-05-08**：补全 API接口对应表.md 至 101 个映射
-- **2026-05-08**：创建技能，基于官方 Tushare skill 模式
