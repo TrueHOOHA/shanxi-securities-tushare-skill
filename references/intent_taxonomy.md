@@ -136,14 +136,10 @@
 **常用接口：**
 - `cn_cpi` → `references/居民消费价格指数.md`
 - `cn_ppi` → `references/工业生产者出厂价格指数.md`
-
 - `cn_gdp` → `references/GDP数据.md`
 - `cn_m` → `references/货币供应量.md`
-
 - `shibor` → `references/Shibor利率数据.md`
 - `shibor_lpr` → `references/LPR贷款基础利率.md`
-
-
 - `hk_daily` → `references/港股行情.md`
 - `index_global` → `references/国际指数.md`
 
