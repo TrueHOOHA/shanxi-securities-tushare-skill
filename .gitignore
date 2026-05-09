@@ -1,1 +1,2 @@
-# No changes needed - only a markdown file was modified, no build artifacts, dependencies, or temp files detected. The existing .gitignore remains empty.
+__pycache__/
+*.pyc
