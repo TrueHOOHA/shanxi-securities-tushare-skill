@@ -94,8 +94,8 @@
 - `index_daily` → `references/指数日线行情.md`
 - `index_classify` → `references/申万行业分类.md`
 - `index_member` → `references/申万行业成分构成.md`
-- `index_classify` + `index_member` → 申万行业分类及成分（暂无独立行业指数行情接口）
 
+说明：查询申万行业分类及其成分时，通常结合 `index_classify` 与 `index_member` 使用；目前暂无独立行业指数行情接口。
 
 
 ---
