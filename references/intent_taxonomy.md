@@ -12,10 +12,10 @@
 
 **常用接口（查阅 `API接口对应表.md` 确认）：**
 - `daily` → `references/A股日线行情.md`
-- `pro_bar` → `references/股票复权行情.md`
+- `adj_factor` + `daily` → 复权行情计算（使用 `references/复权因子.md`）
 - `weekly` → `references/周线行情.md`
 - `monthly` → `references/月线行情.md`
-- `stk_mins` → `references/分钟数据.md`
+
 - `daily_basic` → `references/每日指标.md`
 
 ---
@@ -94,9 +94,9 @@
 - `index_daily` → `references/指数日线行情.md`
 - `index_classify` → `references/申万行业分类.md`
 - `index_member` → `references/申万行业成分构成.md`
-- `sw_daily` → `references/申万行业指数行情.md`
-- `ths_index` → `references/同花顺概念指数.md`
-- `ths_member` → `references/同花顺概念成分股.md`
+- `index_classify` + `index_member` → 申万行业分类及成分（暂无独立行业指数行情接口）
+
+
 
 ---
 
@@ -109,8 +109,8 @@
 
 **常用接口：**
 - `limit_list_d` → `references/涨跌停列表（新）.md`
-- `limit_step` → `references/连板天梯.md`
-- `kpl_list` → `references/开盘啦情绪数据.md`
+
+
 
 ---
 
@@ -122,10 +122,10 @@
 - 最近政策面发生了什么
 
 **常用接口：**
-- `anns_d` → `references/公告信息.md`
-- `news` → `references/新闻资讯.md`
-- `major_news` → `references/重大新闻.md`
-- `research_report` → `references/研究报告.md`
+
+
+
+
 
 ---
 
@@ -139,14 +139,14 @@
 **常用接口：**
 - `cn_cpi` → `references/居民消费价格指数.md`
 - `cn_ppi` → `references/工业生产者出厂价格指数.md`
-- `cn_pmi` → `references/采购经理人指数.md`
+
 - `cn_gdp` → `references/GDP数据.md`
 - `cn_m` → `references/货币供应量.md`
-- `sf_month` → `references/社融数据.md`
+
 - `shibor` → `references/Shibor利率数据.md`
 - `shibor_lpr` → `references/LPR贷款基础利率.md`
-- `us_tycr` → `references/美国国债收益率曲线.md`
-- `us_daily` → `references/美股行情.md`
+
+
 - `hk_daily` → `references/港股行情.md`
 - `index_global` → `references/国际指数.md`
 
