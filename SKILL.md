@@ -210,6 +210,19 @@ description: >
 8. **数据导出与研究准备** - 拉 CSV、回测数据表、导出行情/财务数据
 9. **综合研究简报** - 快速研究 XX、投资者视角简报、全景判断
 
+## SKILL → references → scripts 完整链路
+
+每次执行请按以下链路，避免断链和凭记忆调用：
+
+1. 在 `SKILL.md` 识别任务类型（行情/财务/资金流/宏观等）
+2. 先查 `references/API接口对应表.md` 确认接口名与文档路径
+3. 再查 `references/intent_taxonomy.md` 或 `references/workflow_templates.md` 选执行模板
+4. 打开对应 `references/XXX.md` 文档确认参数、字段、限量规则
+5. 执行代码时优先复用示例脚本：
+   - 股票链路：`scripts/stock_data_demo.py`（`stock_basic` → `daily` → `fina_indicator`）
+   - 基金链路：`scripts/fund_data_demo.py`（`fund_basic` → `fund_nav` → `fund_manager`）
+6. 如涉及环境初始化，先看 `references/调取数据.md`
+
 ### 空结果处理
 空表不一定是失败，要区分：非交易日、区间无数据、股票未上市、参数错误、接口权限不足。不要把所有空结果都说成"接口坏了"。
 
