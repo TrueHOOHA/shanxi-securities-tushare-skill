@@ -5,7 +5,6 @@
 """
 
 import sxsc_tushare as sx
-import pandas as pd
 import os
 
 # 设置山西证券 Tushare token
@@ -23,7 +22,7 @@ def get_fund_list():
     获取基金列表
     """
     try:
-        data = pro.fund_basic(market='E', status='L', fields='ts_code,fund_name,fund_type,found_date,issue_date,delist_date')
+        data = pro.fund_basic(market='E', status='L', fields='ts_code,name,fund_type,found_date,issue_date,delist_date')
         print("基金列表获取成功：")
         print(data.head())
         return data
@@ -51,7 +50,7 @@ def get_fund_manager():
     获取基金经理数据
     """
     try:
-        data = pro.fund_manager(limit=10, fields='ts_code,fund_name,manager_name,begin_date,end_date')
+        data = pro.fund_manager(limit=10, fields='ts_code,name,ann_date,begin_date,end_date')
         print("基金经理数据获取成功：")
         print(data.head())
         return data

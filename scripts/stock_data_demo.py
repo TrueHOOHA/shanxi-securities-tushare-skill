@@ -5,7 +5,6 @@
 """
 
 import sxsc_tushare as sx
-import pandas as pd
 import os
 
 # 设置山西证券 Tushare token
@@ -46,12 +45,12 @@ def get_daily_data(ts_code, start_date, end_date):
         return None
 
 
-def get_financial_data(ts_code, year, quarter):
+def get_financial_data(ts_code, start_date, end_date):
     """
     获取财务指标数据
     """
     try:
-        data = pro.fina_indicator(ts_code=ts_code, year=year, quarter=quarter)
+        data = pro.fina_indicator(ts_code=ts_code, start_date=start_date, end_date=end_date)
         print(f"{ts_code}财务指标数据获取成功：")
         print(data.head())
         return data
@@ -82,9 +81,10 @@ def main():
         get_daily_data(ts_code, start_date, end_date)
         
         # 获取财务数据（最近一年）
-        current_year = datetime.datetime.now().year
-        print(f"\n获取财务数据：{current_year-1}年 第4季度")
-        get_financial_data(ts_code, current_year-1, 4)
+        fin_end_date = end_date
+        fin_start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime('%Y%m%d')
+        print(f"\n获取财务数据：{fin_start_date} 至 {fin_end_date}")
+        get_financial_data(ts_code, fin_start_date, fin_end_date)
 
 
 if __name__ == "__main__":
