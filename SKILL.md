@@ -215,7 +215,7 @@ description: >
 每次执行请按以下链路，避免断链和凭记忆调用：
 
 1. 在 `SKILL.md` 识别任务类型（行情/财务/资金流/宏观等）
-2. 先查 `references/API 接口对应表.md` 确认接口名与文档路径
+2. 先查 `references/API接口对应表.md` 确认接口名与文档路径
 3. 再查 `references/intent_taxonomy.md` 或 `references/workflow_templates.md` 选执行模板
 4. 打开对应 `references/XXX.md` 文档确认参数、字段、限量规则
 5. 参考 `references/examples.md` 了解典型场景的执行要点和输出规范
