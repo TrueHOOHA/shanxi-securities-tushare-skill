@@ -1,5 +1,4 @@
-# 山西证券 Tushare 数据技能
-
+# 山西证券 Tushare 数据Skill
 > 使用山西证券 `sxsc_tushare` 包获取中国金融市场数据的 Agent Skill
 
 ## 概述
