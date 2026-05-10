@@ -95,8 +95,8 @@ df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
 
 | 环境 | 参数 | 说明 |
 |------|------|------|
-| 仿真环境 | `env='prd'` | 纯 Python 环境，直接使用 |
-| 生产环境 | `env='qa'` | Quant 平台环境 |
+| 仿真环境 | `env='prd'` | 纯 Python 环境，PTrade 仿真端 |
+| 生产环境 | `env='qa'` | PTrade 生产端 |
 
 ```python
 import sxsc_tushare as sx
@@ -150,6 +150,6 @@ python scripts/fund_data_demo.py
 
 1. **Token 安全**：不要在代码中硬编码 token，使用环境变量 `SXSC_TUSHARE_TOKEN`
 2. **查表优先**：即使记得接口名称，也要先查 `API接口对应表.md`
-3. **环境选择**：纯 Python 用 `env='prd'`，Quant 平台用 `env='qa'`
+3. **环境选择**：纯 Python 和仿真端用 `env='prd'`，生产端用 `env='qa'`
 4. **日期格式**：统一使用 `YYYYMMDD` 格式（如 `20240101`）
 5. **错误处理**：token 无效、无权限、空结果等均有对应处理策略（见 SKILL.md）
