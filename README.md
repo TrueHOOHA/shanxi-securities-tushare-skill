@@ -95,8 +95,8 @@ df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
 
 | 环境 | 参数 | 说明 |
 |------|------|------|
-| 生产环境 | `env='prd'` | 纯 Python 环境，直接使用 |
-| 仿真环境 | `env='qa'` | Quant 平台环境 |
+| 仿真环境 | `env='prd'` | 纯 Python 环境，直接使用 |
+| 生产环境 | `env='qa'` | Quant 平台环境 |
 
 ```python
 import sxsc_tushare as sx
