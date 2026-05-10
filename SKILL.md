@@ -95,7 +95,7 @@ description: >
 2. 检查 `sxsc_tushare` 包是否已安装
 3. 检查 `SXSC_TUSHARE_TOKEN` 是否存在
 4. 必要时做一次轻量接口冒烟测试（如交易日历/基础接口）
-7. 如用户请求高权限接口，提前提示可能存在积分/权限限制
+5. 如用户请求高权限接口，提前提示可能存在积分/权限限制
 
 若缺失 token，直接提示最短修复路径：`export SXSC_TUSHARE_TOKEN=your_token`。不要等到主查询跑失败了才暴露环境问题。
 
