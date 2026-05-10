@@ -95,20 +95,6 @@ df = pro.daily(ts_code='000001.SZ')
 df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
 ```
 
-## 环境与初始化
-
-| 环境 | 参数 | 说明 |
-|------|------|------|
-| 仿真环境 | `env='prd'` | 纯 Python 环境，PTrade 仿真端 |
-| 生产环境 | `env='qa'` | PTrade 生产端 |
-
-```python
-import sxsc_tushare as sx
-
-sx.set_token(token)           # 设置 token
-pro = sx.get_api(env='prd')   # 获取 API 对象
-```
-
 ## 示例脚本
 
 ### 股票数据查询
