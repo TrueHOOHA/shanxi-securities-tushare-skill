@@ -13,7 +13,7 @@ token = os.getenv('SXSC_TUSHARE_TOKEN') or 'YOUR_TOKEN_HERE'
 sx.set_token(token)
 
 # 初始化 Pro 接口
-# env 参数：'prd' - 生产环境/纯Python环境, 'qa' - 仿真环境
+# env 参数：'prd' - 仿真环境/纯 Python 环境, 'qa' - 生产环境
 pro = sx.get_api(env='prd')
 
 
