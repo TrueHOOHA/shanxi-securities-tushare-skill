@@ -34,26 +34,10 @@ npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git 
 ~/.claude/skills/
 ```
 
-## 快速开始
-
-### 环境准备
+## 环境准备
 
 ```bash
 export SXSC_TUSHARE_TOKEN="你的token"
-```
-
-### 基础用法
-
-```python
-import sxsc_tushare as sx
-
-sx.set_token("你的token")
-pro = sx.get_api(env='prd')  # 仿真环境/纯 Python 环境
-# pro = sx.get_api(env='qa')  # 生产环境
-
-# 获取 A 股日线行情
-df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
-print(df)
 ```
 
 ## 触发条件
