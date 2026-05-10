@@ -1,4 +1,3 @@
-```
 # Dependencies
 __pycache__/
 *.pyc
@@ -39,4 +38,3 @@ build/
 # Virtual environments
 venv/
 .venv/
-```
