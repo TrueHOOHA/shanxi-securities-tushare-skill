@@ -12,12 +12,33 @@
 - 📅 **宏观**：CPI、PPI、GDP、货币供应量、利率（Shibor/Libor/Hibor/LPR）
 - ⚙️ **期货 / 期权**：合约信息、日线行情、持仓排名
 
+## 安装 山西证券 Tushare Skill
+
+### 方法1. 通过 npx skills CLI工具安装（Recommended）
+
+安装 nodejs（如果需要 skills 管理本地包-npx 命令），https://nodejs.cn/download/
+
+在命令行中执行以下命令：
+
+```bash
+npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git --skill shanxi-securities-tushare
+```
+
+通过上述命令，技能将被自动安装到本地的 skills 目录中，并且方便后续同步升级。
+
+### 方法 2. 直接安装
+
+将本项目git clone到本地，把 /shanxi-securities-tushare 目录复制到本地的 skills 目录：
+
+```
+~/.claude/skills/
+```
+
 ## 快速开始
 
 ### 环境准备
 
 ```bash
-pip install sxsc_tushare
 export SXSC_TUSHARE_TOKEN="你的token"
 ```
 
@@ -58,16 +79,16 @@ shanxi-securities-tushare/
 ├── SKILL.md                          # 技能主文件（320 行，精简版）
 ├── README.md                         # 本文件
 ├── scripts/
-│   ├── stock_data_demo.py           # 股票数据示例脚本
-│   └── fund_data_demo.py            # 基金数据示例脚本
+│   ├── stock_data_demo.py            # 股票数据示例脚本
+│   └── fund_data_demo.py             # 基金数据示例脚本
 └── references/
     ├── API接口对应表.md              # 101 个 API ↔ 文档映射（必查）
     ├── 调取数据.md                   # 环境配置与调用说明
-    ├── intent_taxonomy.md           # 意图分类详解（10 大场景）
+    ├── intent_taxonomy.md            # 意图分类详解（10 大场景）
     ├── workflow_templates.md         # 工作流模板（5 种路径）
     ├── examples.md                   # 完整代码示例集合
-    ├── 基础信息.md                  # stock_basic 接口文档
-    ├── A股日线行情.md               # daily 接口文档
+    ├── 基础信息.md                   # stock_basic 接口文档
+    ├── A股日线行情.md                # daily 接口文档
     ├── ... (共 101 个 API 接口文档)
     └── (其他参考文档)
 ```
