@@ -37,7 +37,8 @@ npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git 
 ## 环境准备
 
 ```bash
-export SXSC_TUSHARE_TOKEN="你的token"
+[Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "你的token", "User") //Windows powershell
+export SXSC_TUSHARE_TOKEN="你的token" //Linux、MacOS
 ```
 
 ## 触发条件
