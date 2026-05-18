@@ -61,23 +61,29 @@ export SXSC_TUSHARE_TOKEN="你的token"
 ## 文件结构
 
 ```
-shanxi-securities-tushare/
-├── SKILL.md                          # 技能主文件（320 行，精简版）
-├── README.md                         # 本文件
-├── scripts/
-│   ├── stock_data_demo.py            # 股票数据示例脚本
-│   └── fund_data_demo.py             # 基金数据示例脚本
-└── references/
-    ├── API接口对应表.md              # 101 个 API ↔ 文档映射（必查）
-    ├── 调取数据.md                   # 环境配置与调用说明
-    ├── intent_taxonomy.md            # 意图分类详解（10 大场景）
-    ├── workflow_templates.md         # 工作流模板（5 种路径）
-    ├── examples.md                   # 完整代码示例集合
-    ├── 基础信息.md                   # stock_basic 接口文档
-    ├── A股日线行情.md                # daily 接口文档
-    ├── ... (共 101 个 API 接口文档)
-    └── (其他参考文档)
+.
+├── README.md                                  # 根文档（总入口）
+├── LICENSE
+└── shanxi-securities-tushare/
+    ├── SKILL.md                               # 执行规范入口
+    ├── scripts/
+    │   ├── stock_data_demo.py                 # 股票数据示例脚本
+    │   └── fund_data_demo.py                  # 基金数据示例脚本
+    └── references/
+        ├── API接口对应表.md                   # 101 个 API ↔ 文档映射（必查）
+        ├── 调取数据.md                        # 环境配置与调用说明
+        ├── intent_taxonomy.md                 # 意图分类详解（10 大场景）
+        ├── workflow_templates.md              # 工作流模板（5 种路径）
+        ├── examples.md                        # 完整代码示例集合
+        ├── 基础信息.md                        # stock_basic 接口文档
+        ├── A股日线行情.md                     # daily 接口文档
+        ├── ...（其余接口与专题文档见 references/）
 ```
+
+## 文档入口说明
+
+- 根目录 `README.md`：项目总入口（安装、触发条件、整体结构说明）
+- `shanxi-securities-tushare/SKILL.md`：执行规范入口（调用原则、流程与约束）
 
 ## 核心原则：先查表，再调用
 
