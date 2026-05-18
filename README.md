@@ -81,23 +81,12 @@ shanxi-securities-tushare/
     └── (其他参考文档)
 ```
 
-## 核心原则：先查表，再调用
+## 核心原则：查表优先
 
-**每次调用 API 前，必须先查阅 `references/API接口对应表.md`**，确认：
-1. 接口名称（`pro.api_name`）
-2. 对应的参考文档路径
-3. 输入参数与输出字段
-
-```python
-# ❌ 错误：凭记忆调用
-df = pro.daily(ts_code='000001.SZ')
-
-# ✅ 正确：先查表，再调用
-# 1. 查阅 references/API接口对应表.md → 确认 daily → A股日线行情.md
-# 2. 查阅 references/A股日线行情.md → 确认参数
-# 3. 调用
-df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
-```
+执行规范采用“简述 + 统一规范”方式：
+- 调用前必须先查 `references/API接口对应表.md` 与对应接口文档。
+- 参数、输出、错误处理的详细规则统一见 `shanxi-securities-tushare/references/execution_contract.md`。
+- 本 README 不再重复展开长规则，避免多版本漂移。
 
 ## 示例脚本
 
