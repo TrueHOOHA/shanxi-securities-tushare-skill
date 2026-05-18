@@ -1,6 +1,7 @@
 # Workflow Templates 详细参考
 
-> 本文件是 SKILL.md 中 Workflow templates 的完整展开版。执行任何模板前，先查阅 `API接口对应表.md`。
+> 本文件是工作流模板清单；执行规则采用“简述 + 统一规范”。
+> 详细执行规范（查表优先、参数确认、输出结构、错误处理）统一见 `execution_contract.md`。
 
 ---
 
