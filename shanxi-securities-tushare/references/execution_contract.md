@@ -1,7 +1,7 @@
-# Execution Contract（唯一详细规范）
+# Execution Contract（主规范）
 
 > 适用范围：`shanxi-securities-tushare` skill 的所有执行流程。  
-> 本文档是“查表优先、参数确认、输出结构、错误处理”的唯一详细版本；`SKILL.md`、`README.md`、`intent_taxonomy.md`、`workflow_templates.md` 仅保留简版约束并指向本文。
+> 本文档是“查表优先、参数确认、输出结构、错误处理”的主要详细规范与对齐基准；`SKILL.md`、`README.md`、`intent_taxonomy.md`、`workflow_templates.md` 可保留简版约束或必要摘录，但相关规则应以本文为准并尽量链接到本文。
 
 ## 1. 查表优先（强制）
 
