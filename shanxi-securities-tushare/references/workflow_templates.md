@@ -1,4 +1,6 @@
 # Workflow Templates 详细参考
+> 模板是流程规范，不绑定具体命令行工具。
+
 
 > 本文件是 SKILL.md 中 Workflow templates 的完整展开版。执行任何模板前，先查阅 `API接口对应表.md`。
 
