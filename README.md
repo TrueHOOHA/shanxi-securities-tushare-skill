@@ -80,28 +80,17 @@ export SXSC_TUSHARE_TOKEN="你的token"
         ├── ...（其余接口与专题文档见 references/）
 ```
 
+## 核心原则：查表优先
+
 ## 文档入口说明
 
 - 根目录 `README.md`：项目总入口（安装、触发条件、整体结构说明）
 - `shanxi-securities-tushare/SKILL.md`：执行规范入口（调用原则、流程与约束）
 
-## 核心原则：先查表，再调用
-
-**每次调用 API 前，必须先查阅 `references/API接口对应表.md`**，确认：
-1. 接口名称（`pro.api_name`）
-2. 对应的参考文档路径
-3. 输入参数与输出字段
-
-```python
-# ❌ 错误：凭记忆调用
-df = pro.daily(ts_code='000001.SZ')
-
-# ✅ 正确：先查表，再调用
-# 1. 查阅 references/API接口对应表.md → 确认 daily → A股日线行情.md
-# 2. 查阅 references/A股日线行情.md → 确认参数
-# 3. 调用
-df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240131')
-```
+执行规范采用“简述 + 统一规范”方式：
+- 调用前必须先查 `references/API接口对应表.md` 与对应接口文档。
+- 参数、输出、错误处理的详细规则统一见 `shanxi-securities-tushare/references/execution_contract.md`。
+- 本 README 不再重复展开长规则，避免多版本漂移。
 
 ## 示例脚本
 
