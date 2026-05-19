@@ -88,7 +88,7 @@ export SXSC_TUSHARE_TOKEN="你的token"
 - `shanxi-securities-tushare/SKILL.md`：执行规范入口（调用原则、流程与约束）
 
 执行规范采用“简述 + 统一规范”方式：
-- 调用前必须先查 `shanxi-securities-tushare/references/API接口对应表.md` 与对应接口文档。
+- 调用前必须先查 `references/API接口对应表.md` 与对应接口文档。
 - 参数、输出、错误处理的详细规则统一见 `shanxi-securities-tushare/references/execution_contract.md`。
 - 本 README 不再重复展开长规则，避免多版本漂移。
 
