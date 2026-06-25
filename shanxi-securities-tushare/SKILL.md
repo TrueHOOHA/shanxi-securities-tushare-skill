@@ -34,19 +34,19 @@ description: >
 
 ## 任务分类
 
-| 任务类型 | 典型表达 | 详细映射 |
-|---|---|---|
-| 行情/趋势 | 最近怎么样、涨了多少、放量没有 | `references/intent_taxonomy.md` §1 + `workflow_templates.md` §1 |
-| 基本资料 | 什么公司、什么时候上市、行业 | `intent_taxonomy.md` §2 |
-| 财务/公司质量 | 财报、利润趋势、ROE、现金流 | `intent_taxonomy.md` §3 + `workflow_templates.md` §3 |
-| 估值/筛选 | 估值高不高、谁便宜、低估值高股息 | `intent_taxonomy.md` §4 + `workflow_templates.md` §4 |
-| 资金流/市场行为 | 北向、主力、龙虎榜、板块吸金 | `intent_taxonomy.md` §5 + `workflow_templates.md` §5 |
-| 板块/指数/主题 | 哪个板块最强、成分股、概念主题 | `intent_taxonomy.md` §6 + `workflow_templates.md` §6 |
-| 涨跌停/情绪 | 涨停梯队、连板、活跃度 | `intent_taxonomy.md` §7 |
-| 公告/新闻/研报 | 公告、催化、新闻面 | **受限**：`intent_taxonomy.md` §8，仅告知边界 + 替代路径 |
-| 宏观/跨市场 | CPI、PMI、利率、港股、美股 | `intent_taxonomy.md` §9 |
-| 数据导出/研究准备 | 拉 CSV、回测数据表、Parquet | `intent_taxonomy.md` §10 + `workflow_templates.md` §8 |
-| 综合研究简报 | 快速研究 XX、全景判断 | `workflow_templates.md` §9 |
+| 任务类型 | 典型表达 |
+|---|---|
+| 行情/趋势 | 最近怎么样、涨了多少、放量没有 |
+| 基本资料 | 什么公司、什么时候上市、行业 |
+| 财务/公司质量 | 财报、利润趋势、ROE、现金流 |
+| 估值/筛选 | 估值高不高、谁便宜、低估值高股息 |
+| 资金流/市场行为 | 北向、主力、龙虎榜、板块吸金 |
+| 板块/指数/主题 | 哪个板块最强、成分股、概念主题 |
+| 涨跌停/情绪 | 涨停梯队、连板、活跃度 |
+| 公告/新闻/研报 | 公告、催化、新闻面（**受限**：仅告知边界 + 替代路径） |
+| 宏观/跨市场 | CPI、PMI、利率、港股、美股 |
+| 数据导出/研究准备 | 拉 CSV、回测数据表、Parquet |
+| 综合研究简报 | 快速研究 XX、全景判断 |
 
 ## 关键默认值
 
@@ -79,12 +79,7 @@ description: >
 | 用途 | 路径 |
 |---|---|
 | 接口名 ↔ 文档映射 | `references/API接口对应表.md` |
-| **执行规范（查表/参数/输出/错误）** | `references/execution_contract.md` |
-| 任务详细分类与典型问题 | `references/intent_taxonomy.md` |
-| 9 类工作流详细步骤 | `references/workflow_templates.md` |
-| 典型场景执行要点 | `references/examples.md` |
 | 安装与 HTTP 调取 | `references/调取数据.md` |
-| 维护者更新检查清单 | `references/maintainer_notes.md` |
 | 股票示例脚本 | `scripts/stock_data_demo.py` |
 | 基金示例脚本 | `scripts/fund_data_demo.py` |
 

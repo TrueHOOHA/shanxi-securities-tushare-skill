@@ -9,7 +9,7 @@ import os
 
 # 设置山西证券 Tushare token
 # 注意：只需要在第一次或者 token 失效后调用
-token = os.getenv('SXSC_TUSHARE_TOKEN') or 'YOUR_TOKEN_HERE'
+token = os.getenv('SXSC_TUSHARE_TOKEN')
 sx.set_token(token)
 
 # 初始化 Pro 接口
@@ -64,22 +64,22 @@ def main():
     主函数
     """
     print("===== 山西证券 Tushare 股票数据获取示例 =====")
-    
+
     # 获取股票列表
     stock_list = get_stock_list()
-    
+
     if stock_list is not None:
         # 获取第一只股票的代码
         ts_code = stock_list['ts_code'].iloc[0]
         print(f"\n使用股票代码：{ts_code}")
-        
+
         # 获取日线数据（最近30天）
         import datetime
         end_date = datetime.datetime.now().strftime('%Y%m%d')
         start_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime('%Y%m%d')
         print(f"\n获取日线数据：{start_date} 至 {end_date}")
         get_daily_data(ts_code, start_date, end_date)
-        
+
         # 获取财务数据（最近一年）
         fin_end_date = end_date
         fin_start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime('%Y%m%d')
