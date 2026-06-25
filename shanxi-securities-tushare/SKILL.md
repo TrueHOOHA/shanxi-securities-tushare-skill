@@ -26,7 +26,7 @@ description: >
 1. **理解任务** — 识别用户要解决什么问题（见下方"任务分类"）。
 2. **解析标的** — 名称/代码 → 标准 `ts_code`（如 `600519.SH`）；市场、时间窗、字段按默认值补全。
 3. **查表选接口** — 先查 `references/API接口对应表.md` 拿到 `pro.api_name` 与对应文档路径。🔴 **STOP**：禁止凭记忆写接口，必须查表确认后再调用。
-4. **校验参数** — 日期 `YYYYMMDD`、起止顺序、冲突裁决、未来日期裁剪（细节见 `references/execution_contract.md`）。
+4. **校验参数** — 日期 `YYYYMMDD`、起止顺序、冲突裁决、未来日期裁剪。
 5. 🔴 **CHECKPOINT · 投资建议拦截** — 如果用户问"值不值得买/该不该卖"，**STOP 并明确拒绝**，只提供数据对比（见"反模式清单"#1）。
 6. **取数执行** — 优先复用 `scripts/stock_data_demo.py`、`scripts/fund_data_demo.py`。
 7. **结构化交付** — 一句话结论 → 口径 → 关键指标/表 → 风险/限制 → 文件路径。
@@ -35,19 +35,19 @@ description: >
 
 ## 任务分类
 
-| 任务类型 | 典型表达 | 详细映射 |
-|---|---|---|
-| 行情/趋势 | 最近怎么样、涨了多少、放量没有 | `references/intent_taxonomy.md` §1 + `workflow_templates.md` §1 |
-| 基本资料 | 什么公司、什么时候上市、行业 | `intent_taxonomy.md` §2 |
-| 财务/公司质量 | 财报、利润趋势、ROE、现金流 | `intent_taxonomy.md` §3 + `workflow_templates.md` §3 |
-| 估值/筛选 | 估值高不高、谁便宜、低估值高股息 | `intent_taxonomy.md` §4 + `workflow_templates.md` §4 |
-| 资金流/市场行为 | 北向、主力、龙虎榜、板块吸金 | `intent_taxonomy.md` §5 + `workflow_templates.md` §5 |
-| 板块/指数/主题 | 哪个板块最强、成分股、概念主题 | `intent_taxonomy.md` §6 + `workflow_templates.md` §6 |
-| 涨跌停/情绪 | 涨停梯队、连板、活跃度 | `intent_taxonomy.md` §7 |
-| 公告/新闻/研报 | 公告、催化、新闻面 | **受限**：`intent_taxonomy.md` §8，仅告知边界 + 替代路径 |
-| 宏观/跨市场 | CPI、PMI、利率、港股、美股 | `intent_taxonomy.md` §9 |
-| 数据导出/研究准备 | 拉 CSV、回测数据表、Parquet | `intent_taxonomy.md` §10 + `workflow_templates.md` §8 |
-| 综合研究简报 | 快速研究 XX、全景判断 | `workflow_templates.md` §9 |
+| 任务类型 | 典型表达 |
+|---|---|
+| 行情/趋势 | 最近怎么样、涨了多少、放量没有 |
+| 基本资料 | 什么公司、什么时候上市、行业 |
+| 财务/公司质量 | 财报、利润趋势、ROE、现金流 |
+| 估值/筛选 | 估值高不高、谁便宜、低估值高股息 |
+| 资金流/市场行为 | 北向、主力、龙虎榜、板块吸金 |
+| 板块/指数/主题 | 哪个板块最强、成分股、概念主题 |
+| 涨跌停/情绪 | 涨停梯队、连板、活跃度 |
+| 公告/新闻/研报 | 公告、催化、新闻面（**受限**：仅告知边界 + 替代路径） |
+| 宏观/跨市场 | CPI、PMI、利率、港股、美股 |
+| 数据导出/研究准备 | 拉 CSV、回测数据表、Parquet |
+| 综合研究简报 | 快速研究 XX、全景判断 |
 
 ## 关键默认值
 
@@ -94,12 +94,7 @@ description: >
 | 用途 | 路径 |
 |---|---|
 | 接口名 ↔ 文档映射 | `references/API接口对应表.md` |
-| **执行规范（查表/参数/输出/错误）** | `references/execution_contract.md` |
-| 任务详细分类与典型问题 | `references/intent_taxonomy.md` |
-| 9 类工作流详细步骤 | `references/workflow_templates.md` |
-| 典型场景执行要点 | `references/examples.md` |
 | 安装与 HTTP 调取 | `references/调取数据.md` |
-| 维护者更新检查清单 | `references/maintainer_notes.md` |
 | 股票示例脚本 | `scripts/stock_data_demo.py` |
 | 基金示例脚本 | `scripts/fund_data_demo.py` |
 
@@ -131,4 +126,4 @@ pro.daily(ts_code='600519.SH', start_date='20250101', end_date='20251231')
 | 参数错误 / 字段不存在 | 查 `references/API接口对应表.md` + 对应接口文档确认 `fields` | 明确告知用户该字段不可用，不给替代值 |
 | 网络超时 | 重试 1 次 | 改分段拉取，缩小日期范围到单年 |
 
-> 详细错误处理规范见 `references/execution_contract.md` §4。空结果不一定是失败——先排除真实原因再下结论。
+> 空结果不一定是失败——先排除真实原因再下结论。
