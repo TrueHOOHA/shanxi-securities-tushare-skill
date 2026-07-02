@@ -12,37 +12,98 @@
 - 📅 **宏观**：CPI、PPI、GDP、货币供应量、利率（Shibor/Libor/Hibor/LPR）
 - ⚙️ **期货 / 期权**：合约信息、日线行情、持仓排名
 
-## 安装 山西证券 Tushare Skill
+## 一、Agentic 安装（推荐）
 
-### 方法1. 通过 npx skills CLI工具安装（Recommended）
+> 将以下内容直接发给 Agent，由 Agent 自动完成安装与环境变量配置。
 
-安装 nodejs（如果需要 skills 管理本地包-npx 命令），https://nodejs.cn/download/
+---
 
-在命令行中执行以下命令：
+**前置要求：** 请先安装 Node.js（用于 `npx` 命令），下载地址：https://nodejs.cn/download/
 
-```bash
-npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git --skill shanxi-securities-tushare
+**请将以下内容发送给 Agent：**
+
+```
+请帮我安装山西证券 Tushare Skill，步骤如下：
+
+1. 在命令行中执行以下命令安装技能：
+
+   npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git --skill shanxi-securities-tushare
+
+   技能将被自动安装到本地 skills 目录。
+
+2. 安装完成后，帮我配置环境变量 SXSC_TUSHARE_TOKEN。
+   - 请先询问我："请输入你的山西证券 Tushare Token："
+   - 获取 Token 后，根据我的操作系统自动配置：
+     - Windows PowerShell（永久生效，仅当前用户）：
+       [Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "<我的token>", "User")
+     - Linux / macOS（写入 ~/.bashrc 或 ~/.zshrc，永久生效）：
+       echo 'export SXSC_TUSHARE_TOKEN="<我的token>"' >> ~/.bashrc && source ~/.bashrc
+       （如果使用 zsh，则写入 ~/.zshrc）
+
+3. 配置完成后，请验证环境变量是否生效（读取并确认 SXSC_TUSHARE_TOKEN 已设置）。
 ```
 
-通过上述命令，技能将被自动安装到本地的 skills 目录中，并且方便后续同步升级。
+---
 
-### 方法 2. 直接安装
+## 二、手动安装
 
-将本项目git clone到本地，把 /shanxi-securities-tushare 目录复制到本地的 skills 目录：
+### 步骤 1：获取项目文件
+
+将本项目 `git clone` 到本地，然后把 `/shanxi-securities-tushare` 文件夹复制到 skills 目录：
 
 ```
 ~/.claude/skills/
 ```
 
-## 环境准备
+最终路径结构：
+
+```
+~/.claude/skills/
+└── shanxi-securities-tushare/
+    ├── SKILL.md
+    ├── scripts/
+    └── references/
+```
+
+### 步骤 2：配置环境变量
+
+根据你的操作系统，选择对应方式设置 `SXSC_TUSHARE_TOKEN`：
+
+**Windows PowerShell（永久生效，仅当前用户）：**
+
+```powershell
+[Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "你的token", "User")
+```
+
+**Linux / macOS（临时生效，仅当前终端窗口）：**
 
 ```bash
-# Windows PowerShell (永久设置，仅对当前用户生效)
-[Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "你的token", "User")
-
-# Linux / macOS (临时设置，仅当前终端窗口生效)
 export SXSC_TUSHARE_TOKEN="你的token"
 ```
+
+**Linux / macOS（永久生效，写入 shell 配置文件）：**
+
+```bash
+# bash 用户
+echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.bashrc && source ~/.bashrc
+
+# zsh 用户
+echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.zshrc && source ~/.zshrc
+```
+
+### 步骤 3：验证
+
+确认环境变量已生效：
+
+```bash
+# Linux / macOS
+echo $SXSC_TUSHARE_TOKEN
+
+# Windows PowerShell
+echo $env:SXSC_TUSHARE_TOKEN
+```
+
+---
 
 ## 触发条件
 
