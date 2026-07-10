@@ -98,8 +98,10 @@ pro = sx.get_api(env='prd')  # 'prd' 仿真, 'qa' 生产
 pro.stock_basic(exchange='', list_status='L',
                 fields='ts_code,symbol,name,area,industry,list_date')
 
-# 日线行情
+# 日线行情（ah_vol/ah_amount 为盘后成交量/额，2026-07-06 起有数据，需显式用 fields 指定）
 pro.daily(ts_code='600519.SH', start_date='20250101', end_date='20251231')
+# 取盘后数据示例：
+# pro.daily(trade_date='20260707', fields='ts_code,open,close,ah_vol,ah_amount')
 ```
 
 ### 错误处理

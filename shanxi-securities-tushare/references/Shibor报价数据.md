@@ -4,7 +4,6 @@
 接口：shibor_quote
 描述：Shibor报价数据
 限量：单次最大4000行数据，总量不限制，可通过设置开始和结束日期分段获取
-积分：用户积累120积分可以调取，具体请参阅[积分获取办法](https://tushare.pro/document/1?doc_id=13) 
 
 <br>
 <br>
