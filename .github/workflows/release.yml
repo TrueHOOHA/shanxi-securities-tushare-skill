@@ -20,9 +20,9 @@ jobs:
         run: |
           DATE=$(date -u +%Y.%m.%d)
           SHA=$(git rev-parse --short HEAD)
-          # Append timestamp so multiple pushes on the same day stay unique
+          # Append timestamp so multiple runs on the same commit stay unique
           TS=$(date -u +%H%M%S)
-          echo "tag=v${DATE}-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${DATE}-${SHA}-${TS}" >> "$GITHUB_OUTPUT"
           echo "name=Release ${DATE} ${SHA} (${TS} UTC)" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
