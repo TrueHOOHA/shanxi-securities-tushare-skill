@@ -12,73 +12,42 @@
 - 📅 **宏观**：CPI、PPI、GDP、货币供应量、利率（Shibor/Libor/Hibor/LPR）
 - ⚙️ **期货 / 期权**：合约信息、日线行情、持仓排名
 
-## 一、Agentic 安装（推荐）
+## 一、如果你是人类
 
-> 将以下内容直接发给 Agent，由 Agent 自动完成安装与环境变量配置。
+将下面这个链接发给 AI 助手，并说「帮我安装这个 skill 就行」：
+
+```
+https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
+```
+
+> 剩下的安装、配置工作交给 AI 完成即可，你无需手动操作。
 
 ---
 
-**前置要求：** 请先安装 Node.js（用于 `npx` 命令），下载地址：https://nodejs.cn/download/
+## 二、如果你是 Agent
 
-**请将以下内容发送给 Agent：**
+1. 将本项目下的 `/shanxi-securities-tushare/` 文件夹复制到所使用的 Agent 工具的 `skills/` 目录下。
 
-```
-请帮我安装山西证券 Tushare Skill，步骤如下：
+   最终路径结构示例：
 
-1. 在命令行中执行以下命令安装技能：
+   ```
+   <工具目录>/skills/
+   └── shanxi-securities-tushare/
+       ├── SKILL.md
+       ├── scripts/
+       └── references/
+   ```
 
-   npx skills add https://github.com/TrueHOOHA/shanxi-securities-tushare-skill.git --skill shanxi-securities-tushare
+2. 引导用户配置环境变量 `SXSC_TUSHARE_TOKEN`（详见下方「环境变量配置」）。
 
-   技能将被自动安装到本地 skills 目录。
+### 环境变量配置
 
-2. 安装完成后，帮我配置环境变量 SXSC_TUSHARE_TOKEN。
-   - 请先询问我："请输入你的山西证券 Tushare Token："
-   - 获取 Token 后，根据我的操作系统自动配置：
-     - Windows PowerShell（永久生效，仅当前用户）：
-       [Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "<我的token>", "User")
-     - Linux / macOS（写入 ~/.bashrc 或 ~/.zshrc，永久生效）：
-       echo 'export SXSC_TUSHARE_TOKEN="<我的token>"' >> ~/.bashrc && source ~/.bashrc
-       （如果使用 zsh，则写入 ~/.zshrc）
-
-3. 配置完成后，请验证环境变量是否生效（读取并确认 SXSC_TUSHARE_TOKEN 已设置）。
-```
-
----
-
-## 二、手动安装
-
-### 步骤 1：获取项目文件
-
-将本项目 `git clone` 到本地，然后把 `/shanxi-securities-tushare` 文件夹复制到 skills 目录：
-
-```
-~/.claude/skills/
-```
-
-最终路径结构：
-
-```
-~/.claude/skills/
-└── shanxi-securities-tushare/
-    ├── SKILL.md
-    ├── scripts/
-    └── references/
-```
-
-### 步骤 2：配置环境变量
-
-根据你的操作系统，选择对应方式设置 `SXSC_TUSHARE_TOKEN`：
+向用户询问 Token 后，根据其操作系统配置：
 
 **Windows PowerShell（永久生效，仅当前用户）：**
 
 ```powershell
 [Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "你的token", "User")
-```
-
-**Linux / macOS（临时生效，仅当前终端窗口）：**
-
-```bash
-export SXSC_TUSHARE_TOKEN="你的token"
 ```
 
 **Linux / macOS（永久生效，写入 shell 配置文件）：**
@@ -91,9 +60,7 @@ echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.bashrc && source ~/.bashrc
 echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-### 步骤 3：验证
-
-确认环境变量已生效：
+**验证：**
 
 ```bash
 # Linux / macOS
