@@ -10,7 +10,6 @@
 | `cashflow` | `references/现金流量表.md` |
 | `cb_basic` | `references/可转债基本信息.md` |
 | `cb_daily` | `references/可转债行情.md` |
-| `cb_enhance` | `references/可转债增强.md` |
 | `cb_issue` | `references/可转债发行.md` |
 | `cn_cpi` | `references/居民消费价格指数.md` |
 | `cn_gdp` | `references/GDP数据.md` |
