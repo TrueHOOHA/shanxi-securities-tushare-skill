@@ -85,29 +85,42 @@ description: >
 
 ## Code Examples
 
-### 初始化与日线
+### HTTP 直连（零外部依赖）
 ```python
-import sxsc_tushare as sx
-import os
+import os, json, urllib.request
 
+API_URL = 'http://221.204.19.233:7172'  # Python / 仿真环境端点
 token = os.getenv('SXSC_TUSHARE_TOKEN') or 'YOUR_TOKEN_HERE'
-sx.set_token(token)
-pro = sx.get_api(env='prd')  # 'prd' 仿真, 'qa' 生产
+
+def call_api(api_name, fields='', **params):
+    """通用 HTTP 调取：POST JSON Body，返回 list[dict]。code 非 0 抛错。"""
+    payload = {'api_name': api_name, 'token': token, 'params': params, 'fields': fields}
+    req = urllib.request.Request(
+        API_URL, data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.urlopen(req, timeout=30) as r:
+        res = json.loads(r.read().decode('utf-8'))
+    if res.get('code') != 0:
+        raise RuntimeError(f"{api_name} 调用失败：code={res.get('code')} msg={res.get('msg')}")
+    d = res.get('data') or {}
+    return [dict(zip(d.get('fields', []), row)) for row in d.get('items', [])]
 
 # 股票列表
-pro.stock_basic(exchange='', list_status='L',
-                fields='ts_code,symbol,name,area,industry,list_date')
+call_api('stock_basic', fields='ts_code,symbol,name,area,industry,list_date',
+         exchange='', list_status='L')
 
 # 日线行情（ah_vol/ah_amount 为盘后成交量/额，2026-07-06 起有数据，需显式用 fields 指定）
-pro.daily(ts_code='600519.SH', start_date='20250101', end_date='20251231')
+call_api('daily', ts_code='600519.SH', start_date='20250101', end_date='20251231')
 # 取盘后数据示例：
-# pro.daily(trade_date='20260707', fields='ts_code,open,close,ah_vol,ah_amount')
+# call_api('daily', fields='ts_code,open,close,ah_vol,ah_amount', trade_date='20260707')
 ```
+
+> 生产环境（PTrade 客户端）的 HTTP 端点需咨询山西证券；上述端点适用于 Python / 仿真环境。
 
 ### 错误处理
 ```python
 try:
-    df = pro.daily(ts_code='600519.SH', start_date='20250101', end_date='20251231')
+    rows = call_api('daily', ts_code='600519.SH', start_date='20250101', end_date='20251231')
 except Exception as e:
     print(f"获取数据失败：{e}")
 ```
