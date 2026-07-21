@@ -14,9 +14,10 @@
 
 ## 一、如果你是人类
 
-将下面这个链接发给 AI 助手，并说「帮我安装这个 skill 就行」：
+直接把下面这句话发给 AI 助手：
 
 ```
+帮我安装这个 skill ：
 https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
 ```
 
