@@ -38,3 +38,6 @@ build/
 # Virtual environments
 venv/
 .venv/
+
+# Claude Code (worktrees / local metadata)
+.claude/
