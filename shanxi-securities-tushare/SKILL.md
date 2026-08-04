@@ -6,7 +6,7 @@ description: >
 
 # 山西证券 Tushare 数据技能
 
-把自然语言财经数据请求转为可执行的 Tushare 工作流：**理解任务 → 选接口 → 校验参数 → 取数 → 整理 → 解释 → 交付**。
+把自然语言财经数据请求转为可执行的 Tushare 工作流：**环境校验 → 理解任务 → 解析标的 → 选接口 → 校验参数 → 取数 → 整理 → 解释 → 交付**。
 
 ## 典型场景
 
@@ -23,14 +23,20 @@ description: >
 
 每次执行按这个顺序：
 
-1. **理解任务** — 识别用户要解决什么问题（见下方"任务分类"）。
-2. **解析标的** — 名称/代码 → 标准 `ts_code`（如 `600519.SH`）；市场、时间窗、字段按默认值补全。
-3. **查表选接口** — 先查 `references/API接口对应表.md` 拿到 `pro.api_name` 与对应文档路径，**禁止凭记忆写接口**。
-4. **校验参数** — 日期 `YYYYMMDD`、起止顺序、冲突裁决、未来日期裁剪（细节见 `references/execution_contract.md`）。
-5. **取数执行** — 优先复用 `scripts/stock_data_demo.py`、`scripts/fund_data_demo.py`。
-6. **结构化交付** — 一句话结论 → 口径 → 关键指标/表 → 风险/限制 → 文件路径。
+1. **环境校验** — 检查 `scripts/env_check.json` 缓存是否存在：
+   - 有 → 直接读取，取 `mode` 字段（`sdk`/`http`）决定取数方式。
+   - 无 → 先运行 `python scripts/check_env.py` 生成缓存，再读取。
+   - 退出码非 0（token 缺失）→ 停下，先提示用户配置 `SXSC_TUSHARE_TOKEN`，**不得进入取数**。
+2. **理解任务** — 识别用户要解决什么问题（见下方"任务分类"）。
+3. **解析标的** — 名称/代码 → 标准 `ts_code`（如 `600519.SH`）；市场、时间窗、字段按默认值补全。
+4. **查表选接口** — 先查 `references/API接口对应表.md` 拿到 `pro.api_name` 与对应文档路径，**禁止凭记忆写接口**。
+5. **校验参数** — 日期 `YYYYMMDD`、起止顺序、冲突裁决、未来日期裁剪（规则见下方"关键默认值"第 71–73 行）。
+6. **取数执行** — 按第 1 步的 `mode` 选择方式：
+   - `sdk`：参考 `scripts/` 下模板（`stock_data_demo.py`、`fund_data_demo.py`、`index_sector_demo.py`、`fin_report_demo.py`、`moneyflow_demo.py`）的 SDK 函数，走 `references/调取数据.md` 的 Python SDK 节。
+   - `http`：参考模板中的 HTTP 函数（`http_call`），走 `references/调取数据.md` 的 HTTP 协议节（无 SDK 依赖）。
+7. **结构化交付** — 一句话结论 → 口径 → 关键指标/表 → 风险/限制 → 文件路径。
 
-**关键原则**：先想"这是什么任务、走哪条工作流"，再想"用哪个接口"。**永远不要先翻接口名**。
+**关键原则**：先想"这是什么任务、走哪条工作流"，再想"用哪个接口"。**永远不要先翻接口名**。**取数前先确认环境就绪**（第 1 步），token 缺失时任何取数都无意义。
 
 ## 任务分类
 
@@ -74,14 +80,38 @@ description: >
 - 回测引擎、组合优化系统的实现
 - 无 token / 无权限时伪造数据
 
+## 环境校验
+
+执行任取数任务前，先检查环境是否可用（结果缓存到 `scripts/env_check.json`，避免每次重复校验）：
+
+```bash
+python scripts/check_env.py          # 用缓存（token 未变则复用），否则重新校验
+python scripts/check_env.py --force  # 强制重新校验并覆盖缓存
+python scripts/check_env.py --check  # 只校验不写缓存
+```
+
+校验项：
+
+| 项 | 必需 | 缺失后果 |
+|---|---|---|
+| `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，返回非零退出码，需先配置环境变量 |
+| `sxsc_tushare` 库已安装 | 否 | 有 → 走 SDK 方式（`sxsc_tushare`）；无 → 走 HTTP 协议方式 |
+
+- 退出码非 0 表示 token 缺失，**先解决环境再取数**。
+- 缓存按 token 内容哈希失效：token 变化会触发重新校验，SDK 安装状态每次校验会刷新。
+- 取数方式按校验结果 `mode` 字段选择：`sdk` 用 `references/调取数据.md` 的 Python SDK 节，`http` 用 HTTP 协议节。
+
 ## References 快速索引
 
 | 用途 | 路径 |
 |---|---|
 | 接口名 ↔ 文档映射 | `references/API接口对应表.md` |
 | 安装与 HTTP 调取 | `references/调取数据.md` |
-| 股票示例脚本 | `scripts/stock_data_demo.py` |
-| 基金示例脚本 | `scripts/fund_data_demo.py` |
+| 股票调用模板 | `scripts/stock_data_demo.py` |
+| 基金调用模板 | `scripts/fund_data_demo.py` |
+| 指数/行业调用模板 | `scripts/index_sector_demo.py` |
+| 财务三表调用模板 | `scripts/fin_report_demo.py` |
+| 资金流/龙虎榜调用模板 | `scripts/moneyflow_demo.py` |
 
 ## Code Examples
 

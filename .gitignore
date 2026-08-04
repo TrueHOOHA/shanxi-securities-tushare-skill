@@ -9,6 +9,9 @@ __pycache__/
 .env.local
 .env.*
 
+# Skill env check cache
+shanxi-securities-tushare/scripts/env_check.json
+
 # Logs
 *.log
 

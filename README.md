@@ -71,6 +71,25 @@ echo $SXSC_TUSHARE_TOKEN
 echo $env:SXSC_TUSHARE_TOKEN
 ```
 
+### 环境校验
+
+配置完成后，可运行校验脚本确认环境就绪，结果缓存到 `scripts/env_check.json`（token 未变则复用，避免每次重复校验）：
+
+```bash
+python scripts/check_env.py          # 用缓存（token 未变则复用），否则重新校验
+python scripts/check_env.py --force  # 强制重新校验并覆盖缓存
+python scripts/check_env.py --check  # 只校验不写缓存
+```
+
+校验项：
+
+| 项 | 必需 | 缺失后果 |
+|---|---|---|
+| `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，退出码非 0，需先配置环境变量 |
+| `sxsc_tushare` 库已安装 | 否 | 有 → 走 SDK 方式；无 → 走 HTTP 协议方式 |
+
+输出 `mode` 字段（`sdk`/`http`）指示取数方式；退出码非 0 表示 token 缺失，应先解决环境再取数。
+
 ---
 
 ## 触发条件
@@ -97,8 +116,12 @@ echo $env:SXSC_TUSHARE_TOKEN
 └── shanxi-securities-tushare/
     ├── SKILL.md                               # 执行规范入口
     ├── scripts/
+    │   ├── check_env.py                       # 环境校验脚本（token + SDK，结果缓存 JSON）
     │   ├── stock_data_demo.py                 # 股票数据示例脚本
-    │   └── fund_data_demo.py                  # 基金数据示例脚本
+    │   ├── fund_data_demo.py                  # 基金数据示例脚本
+    │   ├── index_sector_demo.py               # 指数/行业示例脚本
+    │   ├── fin_report_demo.py                 # 财务三表示例脚本
+    │   └── moneyflow_demo.py                  # 资金流向/龙虎榜示例脚本
     └── references/
         ├── API接口对应表.md                   # 100 个 API ↔ 文档映射（必查）
         ├── 调取数据.md                        # 环境配置与调用说明
@@ -121,30 +144,19 @@ echo $env:SXSC_TUSHARE_TOKEN
 - 参数校验、默认值、错误处理等工作流规则统一见 `shanxi-securities-tushare/SKILL.md`。
 - 本 README 不再重复展开长规则，避免多版本漂移。
 
-## 示例脚本
+## 参考模板
 
-### 股票数据查询
+`scripts/` 下的 `*_demo.py` 是 **Agent 调取数据时的参考模板**（非可执行脚本），展示各接口的函数签名、参数说明与返回字段，每个接口同时提供 **SDK 与 HTTP 两种调用方式**，由 Agent 按环境校验结果（`mode` 字段）选择其一复制调用。
 
-```bash
-python scripts/stock_data_demo.py
-```
+| 文件 | 覆盖接口 |
+|---|---|
+| `stock_data_demo.py` | `stock_basic`、`daily`、`fina_indicator` |
+| `fund_data_demo.py` | `fund_basic`、`fund_nav`、`fund_manager` |
+| `index_sector_demo.py` | `index_daily`、`index_classify`、`index_member` |
+| `fin_report_demo.py` | `income`、`balancesheet`、`cashflow` |
+| `moneyflow_demo.py` | `moneyflow`、`moneyflow_hsgt`、`top_list` |
 
-该脚本演示：
-- 初始化 `sxsc_tushare`
-- 查询股票基础信息（`stock_basic`）
-- 查询 A 股日线行情（`daily`）
-- 查询财务指标数据（`fina_indicator`）
-
-### 基金数据查询
-
-```bash
-python scripts/fund_data_demo.py
-```
-
-该脚本演示：
-- 查询公募基金列表（`fund_basic`）
-- 查询基金净值（`fund_nav`）
-- 查询基金经理数据（`fund_manager`）
+其余接口的调用参数见各自 `references/接口文档.md` 的代码示例，两条路径配合使用。
 
 ## API 接口统计
 
