@@ -30,6 +30,6 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.name }}
-          generate_release_notes: true
+          body: ${{ github.event.head_commit.message }}
           draft: false
           prerelease: false
