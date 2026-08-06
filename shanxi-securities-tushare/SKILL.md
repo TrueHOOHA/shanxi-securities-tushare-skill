@@ -85,7 +85,7 @@ description: >
 执行任取数任务前，先检查环境是否可用（结果缓存到 `scripts/env_check.json`，避免每次重复校验）：
 
 ```bash
-python scripts/check_env.py          # 用缓存（token 未变则复用），否则重新校验
+python scripts/check_env.py          # token_set=true 则直接复用缓存，否则实时检测
 python scripts/check_env.py --force  # 强制重新校验并覆盖缓存
 python scripts/check_env.py --check  # 只校验不写缓存
 ```
@@ -98,7 +98,7 @@ python scripts/check_env.py --check  # 只校验不写缓存
 | `sxsc_tushare` 库已安装 | 否 | 有 → 走 SDK 方式（`sxsc_tushare`）；无 → 走 HTTP 协议方式 |
 
 - 退出码非 0 表示 token 缺失，**先解决环境再取数**。
-- 缓存按 token 内容哈希失效：token 变化会触发重新校验，SDK 安装状态每次校验会刷新。
+- 缓存仅存储 token_set 状态与 SDK 安装信息，不保存 token 本身或其哈希；token_set=true 时直接复用缓存。
 - 取数方式按校验结果 `mode` 字段选择：`sdk` 用 `references/调取数据.md` 的 Python SDK 节，`http` 用 HTTP 协议节。
 
 ## References 快速索引

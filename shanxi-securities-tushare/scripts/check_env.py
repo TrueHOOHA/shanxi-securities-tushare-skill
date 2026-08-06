@@ -8,13 +8,12 @@
 2. sxsc_tushare 库是否已安装（可选，决定走 SDK 还是 HTTP 方式）
 
 用法：
-    python check_env.py            # 读取缓存（若存在且 token 未变）或执行校验
+    python check_env.py            # 读取缓存（SDK 信息）或执行校验（token 始终实时检查）
     python check_env.py --force    # 强制重新校验并覆盖缓存
     python check_env.py --check    # 只校验不写缓存
 """
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -24,10 +23,6 @@ from pathlib import Path
 CACHE_FILE = Path(__file__).resolve().parent / "env_check.json"
 TOKEN_ENV = "SXSC_TUSHARE_TOKEN"
 SDK_NAME = "sxsc_tushare"
-
-
-def _token_hash(token):
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _sdk_version():
@@ -46,7 +41,6 @@ def run_check():
 
     return {
         "token_set": bool(token),
-        "token_hash": _token_hash(token) if token else None,
         "sdk_available": sdk_available,
         "sdk_version": sdk_version,
         "mode": "sdk" if sdk_available else "http",
@@ -84,16 +78,17 @@ def main():
         print(CACHE_FILE)
         return 0
 
-    # 优先读缓存：token 未变则复用，token 变化则重新校验
+    # 缓存命中（token_set=true）则直接复用，无需重复检测
     if not args.force and not args.check:
         cached = load_cache()
-        if cached:
-            current_token = os.getenv(TOKEN_ENV)
-            if current_token and cached.get("token_hash") == _token_hash(current_token):
-                print("使用缓存校验结果：")
-                print(json.dumps(cached, ensure_ascii=False, indent=2))
-                return 0 if cached["token_set"] else 1
+        if cached and cached.get("token_set"):
+            print("使用缓存校验结果：")
+            print(json.dumps(cached, ensure_ascii=False, indent=2))
+            if not cached.get("sdk_available"):
+                print("\n提示：未安装 sxsc_tushare 库，将使用 HTTP 协议方式调取数据。")
+            return 0
 
+    # 缓存未命中或 token 未设置：实时检测
     result = run_check()
     if not args.check:
         save_cache(result)
@@ -102,7 +97,6 @@ def main():
         print("校验结果（未写缓存）：")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
-    # 退出码：token 缺失 -> 1（必选失败），SDK 缺失但 token 有 -> 0（可选警告）
     if not result["token_set"]:
         print("\n错误：未设置环境变量 SXSC_TUSHARE_TOKEN，无法执行 skill。")
         print("请参考 README 配置后重试。")
