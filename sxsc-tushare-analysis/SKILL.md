@@ -246,6 +246,9 @@ description: >
   - 取数必须用 `fund_daily` 接口（`daily` 对 ETF 返回空）
   - 价格必须用 `apply_etf_adj` 复权（`fund_adj` 复权因子校正），否则份额拆分/分红会导致不复权价严重失真
   - 基金接口字段名与股票不同，**必须查文档确认**（如 `fund_manager` 字段是 `name` 非 `manager_name`，`fund_div` 字段是 `div_cash` 非 `div_amount`）
+- **指数成分权重注意**：
+  - `index_weight` 的字段是 `trade_date`/`con_code`/`weight`，无 `con_name` 字段——需用 `con_code` 调 `stock_basic` 获取名称
+  - 取最新一期权重：先按 `trade_date` 降序取最大日期，再按 `weight` 降序取前 N 行
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。
