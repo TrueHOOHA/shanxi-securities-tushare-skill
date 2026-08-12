@@ -235,15 +235,21 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 函数 | 用途 |
 |------|------|
-| `calc_returns` | 区间收益率（近 5/20/60/120/250 日） |
+| `calc_returns` / `calc_cagr` | 区间收益率 / 复合年化增长率 |
 | `calc_ma` | 均线值（MA5/10/20/60） |
 | `calc_volatility` | 年化波动率 |
-| `calc_max_drawdown` | 最大回撤（%） |
-| `calc_sharpe` | 夏普比率（年化） |
-| `calc_sortino` | Sortino 比率（下行风险调整） |
+| `calc_max_drawdown` / `calc_drawdown_detail` | 最大回撤 / 回撤持续期+痛苦指数 |
+| `calc_sharpe` / `calc_sortino` | 夏普 / Sortino（下行风险调整） |
 | `calc_information_ratio` | 信息比率（超额收益/跟踪误差） |
+| `calc_rolling_sharpe` / `calc_rolling_beta` | 滚动夏普 / 滚动 Beta（动态监控） |
 | `calc_piotroski_fscore` | Piotroski F-Score（9 项财务健康打分） |
 | `calc_beta_alpha` | CAPM Beta/Alpha 收益归因 |
+| `calc_var_cvar` | VaR/CVaR（在险价值/条件在险价值） |
+| `calc_tail_risk` | 偏度/峰度（尾部风险） |
+| `calc_amihud_illiquidity` | Amihud 非流动性指标 |
+| `calc_relative_strength` | 相对强度（RS，跑赢/跑输基准） |
+| `calc_zscore` | Z-Score 标准化（统计检验） |
+| `calc_event_study` | 事件研究法（CAR 累计异常收益） |
 | `calc_macd` / `calc_rsi` / `calc_kdj` / `calc_boll` | 技术指标（MACD/RSI/KDJ/布林带） |
 | `calc_obv` / `calc_volume_ratio` | 量价分析（OBV/量比） |
 | `calc_percentile_rank` | 历史分位数计算 |
