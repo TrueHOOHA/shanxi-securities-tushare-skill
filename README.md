@@ -27,17 +27,23 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
 
 ## 二、如果你是 Agent
 
-1. 将本项目下的 `/shanxi-securities-tushare/` 文件夹复制到所使用的 Agent 工具的 `skills/` 目录下。
+1. 将本项目下的 `/shanxi-securities-tushare/`（数据 skill）与 `/sxsc-tushare-analysis/`（分析 skill）两个文件夹复制到所使用的 Agent 工具的 `skills/` 目录下。
 
    最终路径结构示例：
 
    ```
    <工具目录>/skills/
-   └── shanxi-securities-tushare/
+   ├── shanxi-securities-tushare/
+   │   ├── SKILL.md
+   │   ├── scripts/
+   │   └── references/
+   └── sxsc-tushare-analysis/
        ├── SKILL.md
-       ├── scripts/
-       └── references/
+       ├── agents/
+       └── scripts/
    ```
+
+   > 两个 skill 需放在同一 `skills/` 目录下，分析 skill 依赖数据 skill 的接口表、demo 模板与 `check_env.py`。
 
 2. 引导用户配置环境变量 `SXSC_TUSHARE_TOKEN`（详见下方「环境变量配置」）。
 
@@ -154,7 +160,8 @@ python scripts/check_env.py --check  # 只校验不写缓存
 ## 文档入口说明
 
 - 根目录 `README.md`：项目总入口（安装、触发条件、整体结构说明）
-- `shanxi-securities-tushare/SKILL.md`：执行规范入口（调用原则、流程与约束）
+- `shanxi-securities-tushare/SKILL.md`：数据 skill 执行规范入口（调用原则、流程与约束）
+- `sxsc-tushare-analysis/SKILL.md`：分析 skill 执行规范入口（多维分析维度、报告模板与流程）
 
 执行规范采用“简述 + 统一规范”方式：
 - 调用前必须先查 `references/API接口对应表.md` 与对应接口文档。
