@@ -81,6 +81,23 @@ def get_daily_for_period(ts_code, end_date, periods=(5, 20, 60, 120, 250)):
     return get_daily_sdk(ts_code, start, end_date).sort_values("trade_date").reset_index(drop=True)
 
 
+# ============ 场内基金（ETF）取数 ============
+def get_fund_daily_sdk(ts_code, start_date, end_date):
+    """SDK 方式：场内基金日线行情（ETF 必须用 fund_daily，不能用 daily——daily 对 ETF 返回空）"""
+    return pro.fund_daily(
+        ts_code=ts_code, start_date=start_date, end_date=end_date,
+        fields="ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
+    )
+
+
+def get_fund_daily_for_period(ts_code, end_date, periods=(5, 20, 60, 120, 250)):
+    """场内基金（ETF）取足最大周期的日线数据，自动推算起始日期。
+    与 get_daily_for_period 同理，但用 fund_daily 接口。
+    """
+    start = calc_start_date(end_date, max(periods))
+    return get_fund_daily_sdk(ts_code, start, end_date).sort_values("trade_date").reset_index(drop=True)
+
+
 # ============ 报告片段示例 ============
 def format_report_snippet(title, conclusion, table_df, note):
     """生成单维度 markdown 片段。"""

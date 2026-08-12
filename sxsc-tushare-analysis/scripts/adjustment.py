@@ -37,6 +37,19 @@ def apply_fund_adj(df_nav, df_adj):
     return merged
 
 
+def apply_etf_adj(df_daily, df_adj):
+    """基于 fund_adj 校正场内基金（ETF）价格序列，消除份额拆分/分红除权扭曲。
+    df_daily: fund_daily 结果（含 trade_date, close）
+    df_adj: fund_adj 结果（含 trade_date, adj_factor）
+    返回 df 增加 close_post 列（后复权收盘价 = close × adj_factor）。
+    ETF 拆分（如 1拆2，adj_factor=2.0）会导致不复权价腰斩，
+    直接算收益会严重失真，必须复权。fund_daily 返回的是不复权价。
+    """
+    merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
+    merged["close_post"] = merged["close"] * merged["adj_factor"]
+    return merged
+
+
 # ============ 横向对比：归一化 ============
 def rebase_series(series_dict, base_date=None):
     """多标的序列归一化（rebase 到基准日=100）。
