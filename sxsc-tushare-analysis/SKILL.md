@@ -249,6 +249,12 @@ description: >
 - **指数成分权重注意**：
   - `index_weight` 的字段是 `trade_date`/`con_code`/`weight`，无 `con_name` 字段——需用 `con_code` 调 `stock_basic` 获取名称
   - 取最新一期权重：先按 `trade_date` 降序取最大日期，再按 `weight` 降序取前 N 行
+- **期货接口注意**：
+  - 上期所交易所代码是 `SHFE`（非 SHF），大商所是 `DCE`，郑商所 `CZCE`，中金所 `CFFEX`
+  - `fut_basic` 查合约用 `exchange` + `symbol`（如 `JM`/`RB`）；主力合约用 `fut_mapping`，但该接口可能返回空，需回退到最活跃合约
+  - `fut_holding` 仅覆盖大商所（DCE）合约，SHFE 螺纹钢等无持仓排名数据，需在报告中注明接口覆盖限制
+  - `fut_wsr` 用 `trade_date` + `symbol`（产品代码如 `JM`/`RB`），返回各仓库明细须按 `symbol` 汇总 `vol`；`ts_code` 参数无效
+  - `fut_settle` 返回降序数据（最新在前），取最新行需 `iloc[0]`；最新交易日结算中时 settle/保证金率为 NaN，需 `dropna(subset=['settle'])` 取最近有值行
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。
