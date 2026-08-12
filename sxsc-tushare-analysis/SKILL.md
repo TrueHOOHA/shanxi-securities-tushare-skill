@@ -216,7 +216,13 @@ description: >
 
 - 每次调用前必须查 `shanxi-securities-tushare/references/API接口对应表.md` 确认接口名和文档路径。
 - 环境校验走 `python shanxi-securities-tushare/scripts/check_env.py`。
-- 取数参考 `shanxi-securities-tushare/scripts/` 下的 demo 模板。
+- 取数参考 `sxsc-tushare-analysis/scripts/common.py` 的环境初始化与取数函数。
+- 分析计算参考 `sxsc-tushare-analysis/scripts/` 下按方法分模块的参考模板：
+  - `basic_metrics.py` — 收益率/MA/波动率/回撤/夏普/Sortino/IR/财务趋势/风险信号
+  - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/Z-Score
+  - `technical_indicators.py` — MACD/RSI/KDJ/布林带/OBV/量比
+  - `risk_modeling.py` — VaR/CVaR/尾部风险/回撤深度/Amihud/滚动Beta/滚动夏普/RS
+  - `attribution.py` — CAPM Beta-Alpha/Piotroski F-Score/事件研究法
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。

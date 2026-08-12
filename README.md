@@ -231,32 +231,16 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ### 计算参考模板
 
-`scripts/analysis_demo.py` 是 Agent 分析计算时的参考模板（非可执行脚本），提供常用指标的现成函数：
+`scripts/` 下按分析方法分模块，Agent 按需引用对应模块的函数：
 
-| 函数 | 用途 |
-|------|------|
-| `calc_returns` / `calc_cagr` | 区间收益率 / 复合年化增长率 |
-| `calc_ma` | 均线值（MA5/10/20/60） |
-| `calc_volatility` | 年化波动率 |
-| `calc_max_drawdown` / `calc_drawdown_detail` | 最大回撤 / 回撤持续期+痛苦指数 |
-| `calc_sharpe` / `calc_sortino` | 夏普 / Sortino（下行风险调整） |
-| `calc_information_ratio` | 信息比率（超额收益/跟踪误差） |
-| `calc_rolling_sharpe` / `calc_rolling_beta` | 滚动夏普 / 滚动 Beta（动态监控） |
-| `calc_piotroski_fscore` | Piotroski F-Score（9 项财务健康打分） |
-| `calc_beta_alpha` | CAPM Beta/Alpha 收益归因 |
-| `calc_var_cvar` | VaR/CVaR（在险价值/条件在险价值） |
-| `calc_tail_risk` | 偏度/峰度（尾部风险） |
-| `calc_amihud_illiquidity` | Amihud 非流动性指标 |
-| `calc_relative_strength` | 相对强度（RS，跑赢/跑输基准） |
-| `calc_zscore` | Z-Score 标准化（统计检验） |
-| `calc_event_study` | 事件研究法（CAR 累计异常收益） |
-| `calc_macd` / `calc_rsi` / `calc_kdj` / `calc_boll` | 技术指标（MACD/RSI/KDJ/布林带） |
-| `calc_obv` / `calc_volume_ratio` | 量价分析（OBV/量比） |
-| `calc_percentile_rank` | 历史分位数计算 |
-| `calc_roe_trend` / `calc_revenue_growth` | 财务趋势分析 |
-| `apply_adj_factor` / `apply_fund_adj` | 股票/基金复权价格序列 |
-| `rebase_series` / `compare_returns` | 多标的归一化与收益率对比 |
-| `flag_risks` | 风险信号汇总 |
+| 模块 | 覆盖函数 |
+|------|---------|
+| `common.py` | `http_call`/`get_daily_sdk`/`get_daily_http`/`format_report_snippet`（环境初始化与取数） |
+| `basic_metrics.py` | `calc_returns`/`calc_cagr`/`calc_ma`/`calc_volatility`/`calc_max_drawdown`/`calc_sharpe`/`calc_sortino`/`calc_information_ratio`/`calc_roe_trend`/`calc_revenue_growth`/`flag_risks` |
+| `adjustment.py` | `apply_adj_factor`/`apply_fund_adj`/`rebase_series`/`compare_returns`/`calc_percentile_rank`/`calc_zscore` |
+| `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
+| `risk_modeling.py` | `calc_var_cvar`/`calc_tail_risk`/`calc_drawdown_detail`/`calc_amihud_illiquidity`/`calc_rolling_beta`/`calc_rolling_sharpe`/`calc_relative_strength` |
+| `attribution.py` | `calc_beta_alpha`/`calc_piotroski_fscore`/`calc_event_study` |
 
 ---
 
@@ -284,7 +268,12 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 └── sxsc-tushare-analysis/                     # 分析 skill（负责多维分析）
     ├── SKILL.md                               # 多维分析执行规范入口
     └── scripts/
-        └── analysis_demo.py                   # 分析计算参考模板（收益率/MA/回撤/夏普等）
+        ├── common.py                          # 环境初始化与取数函数
+        ├── basic_metrics.py                   # 基础指标（收益率/MA/波动率/夏普等）
+        ├── adjustment.py                      # 复权与归一化（adj_factor/rebase/Z-Score）
+        ├── technical_indicators.py            # 技术指标（MACD/RSI/KDJ/布林带/OBV）
+        ├── risk_modeling.py                   # 风险建模（VaR/尾部风险/滚动分析/RS）
+        └── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
 ```
 
 ## 注意事项
