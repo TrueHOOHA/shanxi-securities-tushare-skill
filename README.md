@@ -36,10 +36,9 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
    │   ├── SKILL.md
    │   ├── scripts/
    │   └── references/
-   └── sxsc-tushare-analysis/
-       ├── SKILL.md
-       ├── agents/
-       └── scripts/
+└── sxsc-tushare-analysis/
+        ├── SKILL.md
+        └── scripts/
    ```
 
    > 两个 skill 需放在同一 `skills/` 目录下。分析 skill 依赖数据 skill 的接口表、demo 模板与 `check_env.py`。
@@ -225,8 +224,6 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 │       └── ...（其余接口文档见 references/，每个接口一文档）
 └── sxsc-tushare-analysis/                     # 分析 skill（负责多维分析）
     ├── SKILL.md                               # 多维分析执行规范入口
-    ├── agents/
-    │   └── openai.yaml                        # UI 界面元数据
     └── scripts/
         └── analysis_demo.py                   # 分析计算参考模板（收益率/MA/回撤/夏普等）
 ```
