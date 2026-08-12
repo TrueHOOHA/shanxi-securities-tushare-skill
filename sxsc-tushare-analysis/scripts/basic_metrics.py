@@ -10,7 +10,10 @@ import numpy as np
 
 
 def calc_returns(df_close, periods=(5, 20, 60, 120, 250)):
-    """区间收益率。df_close: 日期升序的 close 序列。"""
+    """区间收益率。df_close: 日期升序的 close 序列。
+    返回 dict：键为「最新收盘」和 f"近{p}日涨幅%"，调用时用字符串键，
+    不要用整数 p 直接访问（如 out["近20日涨幅%"]，而非 out[20]）。
+    """
     latest = df_close.iloc[-1]
     out = {"最新收盘": round(latest, 2)}
     for p in periods:
