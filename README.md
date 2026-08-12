@@ -240,12 +240,16 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 | `calc_volatility` | 年化波动率 |
 | `calc_max_drawdown` | 最大回撤（%） |
 | `calc_sharpe` | 夏普比率（年化） |
-| `calc_roe_trend` | ROE 趋势 |
-| `calc_revenue_growth` | 营收/利润同比增速 |
-| `apply_adj_factor` | 股票后复权价格序列 |
-| `apply_fund_adj` | 基金复权净值序列 |
-| `rebase_series` | 多标的序列归一化（基准日=100） |
-| `compare_returns` | 多标的收益率横向对比表 |
+| `calc_sortino` | Sortino 比率（下行风险调整） |
+| `calc_information_ratio` | 信息比率（超额收益/跟踪误差） |
+| `calc_piotroski_fscore` | Piotroski F-Score（9 项财务健康打分） |
+| `calc_beta_alpha` | CAPM Beta/Alpha 收益归因 |
+| `calc_macd` / `calc_rsi` / `calc_kdj` / `calc_boll` | 技术指标（MACD/RSI/KDJ/布林带） |
+| `calc_obv` / `calc_volume_ratio` | 量价分析（OBV/量比） |
+| `calc_percentile_rank` | 历史分位数计算 |
+| `calc_roe_trend` / `calc_revenue_growth` | 财务趋势分析 |
+| `apply_adj_factor` / `apply_fund_adj` | 股票/基金复权价格序列 |
+| `rebase_series` / `compare_returns` | 多标的归一化与收益率对比 |
 | `flag_risks` | 风险信号汇总 |
 
 ---

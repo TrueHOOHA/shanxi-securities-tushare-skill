@@ -184,6 +184,202 @@ def flag_risks(stock_code, df_price, df_margin=None, df_holding=None):
     return risks
 
 
+# ============ 技术指标 ============
+def calc_macd(df_close, fast=12, slow=26, signal=9):
+    """MACD 指标。返回 (DIF, DEA, MACD柱) 最新值。"""
+    ema_fast = df_close.ewm(span=fast, adjust=False).mean()
+    ema_slow = df_close.ewm(span=slow, adjust=False).mean()
+    dif = ema_fast - ema_slow
+    dea = dif.ewm(span=signal, adjust=False).mean()
+    macd_bar = (dif - dea) * 2
+    return {
+        "DIF": round(dif.iloc[-1], 2),
+        "DEA": round(dea.iloc[-1], 2),
+        "MACD": round(macd_bar.iloc[-1], 2),
+        "signal": "金叉" if dif.iloc[-1] > dea.iloc[-1] else "死叉",
+    }
+
+
+def calc_rsi(df_close, period=14):
+    """RSI 相对强弱指标。返回最新 RSI 值与超买/超卖判断。"""
+    delta = df_close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss
+    rsi = 100 - 100 / (1 + rs)
+    val = round(rsi.iloc[-1], 1)
+    flag = "超买" if val > 70 else ("超卖" if val < 30 else "中性")
+    return {"RSI": val, "signal": flag}
+
+
+def calc_kdj(df_high, df_low, df_close, period=9):
+    """KDJ 随机指标。返回 K/D/J 最新值。"""
+    low_min = df_low.rolling(period).min()
+    high_max = df_high.rolling(period).max()
+    rsv = (df_close - low_min) / (high_max - low_min) * 100
+    k = rsv.ewm(alpha=1 / 3, adjust=False).mean()
+    d = k.ewm(alpha=1 / 3, adjust=False).mean()
+    j = 3 * k - 2 * d
+    return {
+        "K": round(k.iloc[-1], 2),
+        "D": round(d.iloc[-1], 2),
+        "J": round(j.iloc[-1], 2),
+        "signal": "金叉" if k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2] else
+                  ("死叉" if k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2] else "无叉"),
+    }
+
+
+def calc_boll(df_close, window=20, num_std=2):
+    """布林带。返回上轨/中轨/下轨及当前位置判断。"""
+    mid = df_close.rolling(window).mean()
+    std = df_close.rolling(window).std()
+    upper = mid + num_std * std
+    lower = mid - num_std * std
+    price = df_close.iloc[-1]
+    up = round(upper.iloc[-1], 2)
+    lo = round(lower.iloc[-1], 2)
+    md = round(mid.iloc[-1], 2)
+    pos = "触及上轨（超买）" if price >= up * 0.98 else (
+          "触及下轨（超卖）" if price <= lo * 1.02 else "中轨附近")
+    return {"上轨": up, "中轨": md, "下轨": lo, "position": pos}
+
+
+# ============ 历史分位数 ============
+def calc_percentile_rank(value, historical_series):
+    """计算当前值在历史序列中的百分位。
+    value: 当前值（如当前 PE）
+    historical_series: 历史值序列（如近 5 年每日 PE）
+    返回 0-100 的百分位数，如 85 表示当前值高于历史 85% 的时间。
+    """
+    arr = np.array(historical_series.dropna())
+    rank = (arr < value).sum() / len(arr) * 100
+    return round(rank, 1)
+
+
+# ============ 风险调整收益（进阶） ============
+def calc_sortino(df_nav, risk_free=0.02, periods=250):
+    """Sortino 比率（仅用下行波动率，比 Sharpe 更合理）。"""
+    ret = df_nav.pct_change().dropna()
+    if len(ret) < 2:
+        return None
+    annual_ret = ret.mean() * periods
+    downside = ret[ret < 0]
+    if len(downside) == 0 or downside.std() == 0:
+        return None
+    annual_downside_std = downside.std() * np.sqrt(periods)
+    return round((annual_ret - risk_free) / annual_downside_std, 2)
+
+
+def calc_information_ratio(stock_returns, benchmark_returns, periods=250):
+    """信息比率 = 超额收益年化 / 跟踪误差年化。"""
+    excess = stock_returns - benchmark_returns
+    if len(excess) < 2 or excess.std() == 0:
+        return None
+    annual_excess = excess.mean() * periods
+    tracking_error = excess.std() * np.sqrt(periods)
+    return round(annual_excess / tracking_error, 2)
+
+
+# ============ 财务健康评分：Piotroski F-Score ============
+def calc_piotroski_fscore(df_fina, df_income, df_cashflow):
+    """Piotroski F-Score（0-9 分）。
+    需要 2 期年报数据（当期 + 去年同期）。
+    df_fina: fina_indicator 结果（含 roe, grossprofit_margin）
+    df_income: income 结果（含 total_revenue, n_income_attr_p）
+    df_cashflow: cashflow 结果（含 n_cashflow_act）
+    各项均按 end_date 排序后取最近 2 期对比。
+    """
+    df_fina = df_fina.sort_values("end_date").tail(2)
+    df_income = df_income.sort_values("end_date").tail(2)
+    df_cashflow = df_cashflow.sort_values("end_date").tail(2)
+
+    score = 0
+    details = []
+
+    # 1. 净利润为正
+    ni = df_income["n_income_attr_p"].iloc[-1]
+    s = ni > 0
+    score += s; details.append(f"净利润为正: {'是' if s else '否'}")
+
+    # 2. 经营现金流为正
+    cfo = df_cashflow["n_cashflow_act"].iloc[-1]
+    s = cfo > 0
+    score += s; details.append(f"经营现金流为正: {'是' if s else '否'}")
+
+    # 3. ROA 上升（用 ROE 近似）
+    if len(df_fina) >= 2:
+        s = df_fina["roe"].iloc[-1] > df_fina["roe"].iloc[-2]
+    else:
+        s = False
+    score += s; details.append(f"ROE 上升: {'是' if s else '否'}")
+
+    # 4. CFO > 净利润（盈利质量）
+    s = cfo > ni
+    score += s; details.append(f"现金流>净利润: {'是' if s else '否'}")
+
+    # 5. 毛利率上升
+    if len(df_fina) >= 2:
+        s = df_fina["grossprofit_margin"].iloc[-1] > df_fina["grossprofit_margin"].iloc[-2]
+    else:
+        s = False
+    score += s; details.append(f"毛利率上升: {'是' if s else '否'}")
+
+    # 6. 资产周转率上升（营收/总资产）
+    if len(df_income) >= 2 and "total_revenue" in df_income.columns:
+        rev_growth = df_income["total_revenue"].iloc[-1] / df_income["total_revenue"].iloc[-2]
+        s = rev_growth > 1
+    else:
+        s = False
+    score += s; details.append(f"营收增长: {'是' if s else '否'}")
+
+    rating = "强" if score >= 7 else ("弱" if score <= 2 else "中等")
+    return {"F-Score": score, "rating": rating, "details": details}
+
+
+# ============ 量价分析 ============
+def calc_obv(df_close, df_vol):
+    """OBV（能量潮）。返回 OBV 趋势方向。"""
+    direction = np.where(df_close.diff() > 0, 1, np.where(df_close.diff() < 0, -1, 0))
+    obv = (direction * df_vol).cumsum()
+    trend = "上升" if obv.iloc[-1] > obv.iloc[-5] else ("下降" if obv.iloc[-1] < obv.iloc[-5] else "持平")
+    return {"OBV": round(obv.iloc[-1], 0), "trend": trend}
+
+
+def calc_volume_ratio(df_vol, window=5):
+    """量比 = 当日成交量 / 近 N 日平均成交量。"""
+    ma_vol = df_vol.tail(window + 1).head(window).mean()
+    if ma_vol == 0:
+        return None
+    ratio = df_vol.iloc[-1] / ma_vol
+    flag = "放量" if ratio > 2 else ("缩量" if ratio < 0.5 else "正常")
+    return {"量比": round(ratio, 2), "signal": flag}
+
+
+# ============ 收益归因：Beta/Alpha ============
+def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
+    """CAPM Beta/Alpha 分解。
+    stock_returns / market_returns: 日收益率序列（对齐索引）。
+    返回 Beta（市场敏感度）、Alpha（超额收益年化）。
+    """
+    aligned = pd.DataFrame({"stock": stock_returns, "market": market_returns}).dropna()
+    if len(aligned) < 30:
+        return None
+    stock = np.asarray(aligned["stock"], dtype=float)
+    market = np.asarray(aligned["market"], dtype=float)
+    cov = np.cov(stock, market)[0, 1]
+    var = np.var(market)
+    if var == 0:
+        return None
+    beta = round(cov / var, 2)
+    alpha_daily = stock.mean() - (risk_free / periods) - beta * (market.mean() - risk_free / periods)
+    alpha_annual = round(alpha_daily * periods * 100, 2)
+    return {
+        "Beta": beta,
+        "Alpha(年化%)": alpha_annual,
+        "interpretation": f"市场敏感度{'高' if beta > 1.2 else ('低' if beta < 0.8 else '适中')}，{'跑赢' if alpha_annual > 0 else '跑输'}市场"
+    }
+
+
 # ============ 报告片段示例 ============
 def format_report_snippet(title, conclusion, table_df, note):
     """生成单维度 markdown 片段。"""
