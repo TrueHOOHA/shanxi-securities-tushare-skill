@@ -1,0 +1,4 @@
+interface:
+  display_name: "山西证券 Tushare 多维分析"
+  short_description: "基于 sxsc_tushare 数据的沪深股/指数/基金/期货多维分析"
+  default_prompt: "用 $skill-name 分析一下贵州茅台（600519）的估值、财务和资金面"

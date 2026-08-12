@@ -113,22 +113,37 @@ python scripts/check_env.py --check  # 只校验不写缓存
 .
 ├── README.md                                  # 根文档（总入口）
 ├── LICENSE
-└── shanxi-securities-tushare/
-    ├── SKILL.md                               # 执行规范入口
-    ├── scripts/
-    │   ├── check_env.py                       # 环境校验脚本（token + SDK，结果缓存 JSON）
-    │   ├── stock_data_demo.py                 # 股票数据示例脚本
-    │   ├── fund_data_demo.py                  # 基金数据示例脚本
-    │   ├── index_sector_demo.py               # 指数/行业示例脚本
-    │   ├── fin_report_demo.py                 # 财务三表示例脚本
-    │   └── moneyflow_demo.py                  # 资金流向/龙虎榜示例脚本
-    └── references/
-        ├── API接口对应表.md                   # 100 个 API ↔ 文档映射（必查）
-        ├── 调取数据.md                        # 环境配置与调用说明
-        ├── 基础信息.md                        # stock_basic 接口文档
-        ├── A股日线行情.md                     # daily 接口文档
-        └── ...（其余接口文档见 references/，每个接口一文档）
+├── shanxi-securities-tushare/                 # 数据 skill（只负责取数）
+│   ├── SKILL.md                               # 执行规范入口
+│   ├── scripts/
+│   │   ├── check_env.py                       # 环境校验脚本（token + SDK，结果缓存 JSON）
+│   │   ├── stock_data_demo.py                 # 股票数据示例脚本
+│   │   ├── fund_data_demo.py                  # 基金数据示例脚本
+│   │   ├── index_sector_demo.py               # 指数/行业示例脚本
+│   │   ├── fin_report_demo.py                 # 财务三表示例脚本
+│   │   └── moneyflow_demo.py                  # 资金流向/龙虎榜示例脚本
+│   └── references/
+│       ├── API接口对应表.md                   # 100 个 API ↔ 文档映射（必查）
+│       ├── 调取数据.md                        # 环境配置与调用说明
+│       ├── 基础信息.md                        # stock_basic 接口文档
+│       ├── A股日线行情.md                     # daily 接口文档
+│       └── ...（其余接口文档见 references/，每个接口一文档）
+└── sxsc-tushare-analysis/                     # 分析 skill（负责多维分析）
+    ├── SKILL.md                               # 多维分析执行规范入口
+    ├── agents/
+    │   └── openai.yaml                        # UI 界面元数据
+    └── scripts/
+        └── analysis_demo.py                   # 分析计算参考模板（收益率/MA/回撤/夏普等）
 ```
+
+## 双 skill 分工
+
+| Skill | 职责 | 触发词 |
+|-------|------|--------|
+| `shanxi-securities-tushare` | 只负责**取数**：环境校验、接口调用、数据结构化交付 | "拉份数据"、"导出CSV"、"查下行情" |
+| `sxsc-tushare-analysis` | 负责**多维分析**：基于取数结果做交叉分析并输出报告 | "分析一下XX"、"深度研究XX"、"XX怎么样" |
+
+> `sxsc-tushare-analysis` 依赖 `shanxi-securities-tushare` 的接口表、demo 模板和 `check_env.py`，两者需放在同一级目录下使用。
 
 ## 核心原则：查表优先
 
