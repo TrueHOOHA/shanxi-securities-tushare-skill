@@ -58,6 +58,29 @@ def get_daily_http(ts_code, start_date, end_date):
     )
 
 
+def calc_start_date(end_date, n_trading_days, buffer_days=40):
+    """按需要的交易日数推算起始日期（YYYYMMDD）。
+    n 个交易日约需 n × 1.45 个自然日（含周末/节假日），
+    再加 buffer_days 余量确保数据充分。
+    用法：要算近 250 日涨跌幅时，start_date = calc_start_date(end_date, 250)。
+    """
+    from datetime import datetime, timedelta
+    e = datetime.strptime(end_date, "%Y%m%d")
+    approx = int(n_trading_days * 1.45) + buffer_days
+    return (e - timedelta(days=approx)).strftime("%Y%m%d")
+
+
+def get_daily_for_period(ts_code, end_date, periods=(5, 20, 60, 120, 250)):
+    """取足最大周期的日线数据，自动推算起始日期。
+    periods: 需要计算的交易日周期列表（如近 5/20/60/120/250 日）。
+    返回按 trade_date 升序、重置索引的 DataFrame。
+    调用方无需关心 start_date——脚本按最大周期自动预留余量，
+    避免「要 250 日却只取 249 日导致 N/A」的坑。
+    """
+    start = calc_start_date(end_date, max(periods))
+    return get_daily_sdk(ts_code, start, end_date).sort_values("trade_date").reset_index(drop=True)
+
+
 # ============ 报告片段示例 ============
 def format_report_snippet(title, conclusion, table_df, note):
     """生成单维度 markdown 片段。"""

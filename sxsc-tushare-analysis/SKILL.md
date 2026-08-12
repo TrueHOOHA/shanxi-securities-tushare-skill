@@ -219,6 +219,8 @@ description: >
 - 每次调用前必须查 `shanxi-securities-tushare/references/API接口对应表.md` 确认接口名和文档路径。
 - 环境校验走 `python shanxi-securities-tushare/scripts/check_env.py`。
 - 取数参考 `sxsc-tushare-analysis/scripts/common.py` 的环境初始化与取数函数。
+  - 优先使用 `get_daily_for_period(ts_code, end_date, periods)` 按最大周期自动推算起始日期，避免手动计算 start_date 导致数据不足。
+  - 如需手动指定日期，用 `calc_start_date(end_date, n_trading_days)` 计算。
 - 分析计算参考 `sxsc-tushare-analysis/scripts/` 下按方法分模块的参考模板：
   - `basic_metrics.py` — 收益率/MA/波动率/回撤/夏普/Sortino/IR/财务趋势/风险信号
   - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/Z-Score

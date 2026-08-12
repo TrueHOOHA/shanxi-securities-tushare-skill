@@ -235,7 +235,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 模块 | 覆盖函数 |
 |------|---------|
-| `common.py` | `http_call`/`get_daily_sdk`/`get_daily_http`/`format_report_snippet`（环境初始化与取数） |
+| `common.py` | `http_call`/`get_daily_sdk`/`get_daily_http`/`get_daily_for_period`/`calc_start_date`/`format_report_snippet`（环境初始化、自动足量取数与报告片段） |
 | `basic_metrics.py` | `calc_returns`/`calc_cagr`/`calc_ma`/`calc_volatility`/`calc_max_drawdown`/`calc_sharpe`/`calc_sortino`/`calc_information_ratio`/`calc_roe_trend`/`calc_revenue_growth`/`flag_risks` |
 | `adjustment.py` | `apply_adj_factor`/`apply_fund_adj`/`rebase_series`/`compare_returns`/`calc_percentile_rank`/`calc_zscore` |
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
