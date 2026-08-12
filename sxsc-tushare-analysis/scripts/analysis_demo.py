@@ -111,6 +111,65 @@ def calc_revenue_growth(df):
     return df[["end_date", "rev_yoy", "profit_yoy"]].tail(8)
 
 
+# ============ 纵向对比：复权处理 ============
+def apply_adj_factor(df_daily, df_adj):
+    """基于 adj_factor 构建后复权价格序列。
+    df_daily: daily 接口结果（含 close, trade_date）
+    df_adj: adj_factor 接口结果（含 trade_date, adj_factor）
+    返回 df 增加 close_post 列（后复权收盘价）。
+    """
+    merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
+    merged["close_post"] = merged["close"] * merged["adj_factor"]
+    return merged
+
+
+def apply_fund_adj(df_nav, df_adj):
+    """基于 fund_adj 构建基金复权净值序列。
+    df_nav: fund_nav 结果（含 nav_date, unit_nav）
+    df_adj: fund_adj 结果（含 trade_date, adj_factor）
+    返回 df 增加 adj_nav 列（复权净值，前复权）。
+    """
+    merged = df_nav.merge(
+        df_adj[["trade_date", "adj_factor"]].rename(columns={"trade_date": "nav_date"}),
+        on="nav_date", how="left"
+    )
+    latest_factor = merged["adj_factor"].iloc[0] if not merged.empty else 1.0
+    merged["adj_nav"] = merged["unit_nav"] * merged["adj_factor"] / latest_factor
+    return merged
+
+
+# ============ 横向对比：归一化 ============
+def rebase_series(series_dict, base_date=None):
+    """多标的序列归一化（rebase 到基准日=100）。
+    series_dict: {label: Series}，每个 Series 索引为日期、值为复权价或净值。
+    base_date: 基准日字符串 YYYYMMDD，默认取各序列最早公共日期。
+    返回归一化后的 DataFrame，每列=一个标的，基准日=100。
+    """
+    import pandas as pd
+    df = pd.DataFrame(series_dict)
+    if base_date is None:
+        base_date = df.index[0]
+    base_val = df.loc[base_date]
+    return (df / base_val * 100).round(2)
+
+
+def compare_returns(series_dict, periods=(20, 60, 120, 250)):
+    """多标的收益率横向对比表。
+    series_dict: {label: Series}，每个 Series 为复权价/复权净值（日期升序）。
+    返回 DataFrame，行=各标的，列=各区间收益率(%)。
+    """
+    import pandas as pd
+    rows = {}
+    for label, s in series_dict.items():
+        latest = s.iloc[-1]
+        row = {"标的": label, "最新值": round(latest, 2)}
+        for p in periods:
+            if len(s) > p:
+                row[f"近{p}日涨幅%"] = round((latest / s.iloc[-1 - p] - 1) * 100, 2)
+        rows[label] = row
+    return pd.DataFrame(rows.values())
+
+
 def flag_risks(stock_code, df_price, df_margin=None, df_holding=None):
     """风险信号汇总（示例规则，Agent 可按需扩展）。"""
     risks = []
