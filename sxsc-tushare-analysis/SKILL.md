@@ -223,6 +223,12 @@ description: >
   - `technical_indicators.py` — MACD/RSI/KDJ/布林带/OBV/量比
   - `risk_modeling.py` — VaR/CVaR/尾部风险/回撤深度/Amihud/滚动Beta/滚动夏普/RS
   - `attribution.py` — CAPM Beta-Alpha/Piotroski F-Score/事件研究法
+- **字段单位注意**：各接口字段单位不同，取数后必须确认字段含义与单位再计算。常见单位差异：
+  - `moneyflow` 的 `*_amount` 字段单位为**万元**，换算亿元需 `/1e4`
+  - `daily` 的 `amount` 字段单位为**千元**（即元×1000），换算亿元需 `/1e5`
+  - `daily_basic` 的 `total_mv` 字段单位为**万元**，换算亿元需 `/1e4`
+  - `margin_detail` 的 `rzye` 字段单位为**元**，换算亿元需 `/1e8`
+  - 其他接口以对应接口文档标注为准，不得猜单位
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。

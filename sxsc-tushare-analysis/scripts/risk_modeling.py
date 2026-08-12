@@ -83,6 +83,7 @@ def calc_drawdown_detail(df_nav):
 def calc_amihud_illiquidity(price_returns, dollar_volume):
     """Amihud 非流动性指标 = |日收益率| / 日成交额（百万元）。
     衡量单位资金引起的价格变动，值越大 = 流动性越差。
+    dollar_volume: 日成交额，单位为元（如 daily.amount 来自数据接口，其单位为千元，需先 ×1000 转元）。
     """
     ret = np.asarray(np.abs(price_returns).dropna(), dtype=float)
     vol = np.asarray(dollar_volume.reindex(price_returns.index).dropna(), dtype=float)
