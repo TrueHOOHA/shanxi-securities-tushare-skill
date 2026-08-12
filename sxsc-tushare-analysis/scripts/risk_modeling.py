@@ -90,7 +90,7 @@ def calc_amihud_illiquidity(price_returns, dollar_volume):
     if min_len == 0:
         return None
     ret = ret[:min_len]
-    vol = vol[:min_len]
+    vol = vol[:min_len].copy()
     vol[vol == 0] = 1e-10
     illiq = ret / (vol / 1e6)
     mean_illiq = round(float(illiq.mean()), 6)
