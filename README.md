@@ -36,9 +36,9 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
    │   ├── SKILL.md
    │   ├── scripts/
    │   └── references/
-└── sxsc-tushare-analysis/
-        ├── SKILL.md
-        └── scripts/
+   └── sxsc-tushare-analysis/
+       ├── SKILL.md
+       └── scripts/
    ```
 
    > 两个 skill 需放在同一 `skills/` 目录下。分析 skill 依赖数据 skill 的接口表、demo 模板与 `check_env.py`。
