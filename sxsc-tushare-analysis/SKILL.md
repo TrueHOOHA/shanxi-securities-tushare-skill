@@ -54,7 +54,7 @@ description: >
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
 | 1 | 概况 | `stock_basic`、`stock_company` | 公司全称、行业（申万）、上市日期、注册地、员工数、主营业务简介 |
-| 2 | 行情趋势 | `daily`、`weekly`、`monthly`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数) | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**跑赢/跑输沪深300及所属申万行业指数** |
+| 2 | 行情趋势 | `daily`、`weekly`、`monthly`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数) | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**基准对比**：对沪深300及所属行业指数计算相同口径的涨跌幅、年化波动率、最大回撤、夏普比率，与标的并列对比（判断超额收益与相对风险） |
 | 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_dailybasic` 取行业 PE/PB 均值）；**PE/PB 历史分位数**（取近 5 年 `daily_basic` 全量 → `percentile_rank` 计算） |
 | 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`** | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）** |
 | 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`** | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向 |
