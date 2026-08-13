@@ -147,7 +147,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 |---|---|
 | `stock_data_demo.py` | `stock_basic`、`daily`、`fina_indicator` |
 | `fund_data_demo.py` | `fund_basic`、`fund_nav`、`fund_manager` |
-| `index_sector_demo.py` | `index_daily`、`index_classify`、`index_member` |
+| `index_sector_demo.py` | `index_daily`、`index_classify`、`index_member`、`index_global` |
 | `fin_report_demo.py` | `income`、`balancesheet`、`cashflow` |
 | `moneyflow_demo.py` | `moneyflow`、`moneyflow_hsgt`、`top_list` |
 

@@ -100,3 +100,26 @@ def get_index_member_http(index_code):
         {"index_code": index_code},
         "index_code,con_code,con_name,in_date,out_date",
     )
+
+
+# ============ 接口：index_global 国际指数行情 ============
+# 说明：获取国际主要指数日线行情
+# SDK 签名：pro.index_global(ts_code='', trade_date='', start_date='', end_date='', fields='')
+# 注意：ts_code 格式为无点前缀的代码，如 DJI（道琼斯）、SPX（标普500）、IXIC（纳斯达克）、
+#       N225（日经225）、HSI（恒生指数）、XIN9（富时A50）等，详见 references/国际指数.md
+# 不要写成 .DJI 或 ^DJI —— 该接口不使用点前缀
+def get_index_global_sdk(ts_codes, start_date, end_date):
+    """SDK 方式：国际指数行情（多指数逗号分隔）"""
+    return pro.index_global(
+        ts_code=ts_codes, start_date=start_date, end_date=end_date,
+        fields="ts_code,trade_date,close,open,high,low,pct_chg",
+    )
+
+
+def get_index_global_http(ts_codes, start_date, end_date):
+    """HTTP 方式：国际指数行情"""
+    return http_call(
+        "index_global",
+        {"ts_code": ts_codes, "start_date": start_date, "end_date": end_date},
+        "ts_code,trade_date,close,open,high,low,pct_chg",
+    )
