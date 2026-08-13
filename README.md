@@ -5,7 +5,7 @@
 | Skill | 职责 | 适用场景 |
 |-------|------|---------|
 | `shanxi-securities-tushare` | **数据获取**：调用 100+ 金融数据接口，批量取数并结构化交付 | 取数、导出、回测数据准备 |
-| `sxsc-tushare-analysis` | **多维分析**：基于数据 skill 的接口，对标的进行交叉分析并输出报告 | 分析、研究、评估、对比 |
+| `sxsc-tushare-analysis` | **综合分析**：基于数据 skill 的接口，对标的进行交叉分析并输出报告 | 分析、研究、评估、对比 |
 
 ---
 
@@ -153,7 +153,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ---
 
-## 四、Skill 2：多维分析（sxsc-tushare-analysis）
+## 四、Skill 2：综合分析（sxsc-tushare-analysis）
 
 ### 触发条件
 
@@ -161,7 +161,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 - 用户说"分析一下XX""帮我看看XX""深度研究XX""XX怎么样""XX基本面""XX技术面""XX估值""XX财务"
 - 用户说"评估XX""对比XX""研究XX""XX的业绩表现""XX的风险"
-- 用户要求对股票/指数/基金/期货进行多维分析或出具研究简报
+- 用户要求对股票/指数/基金/期货进行综合分析或出具研究简报
 
 > 本 skill 自动调用 `sxsc_tushare` 取数并输出完整报告，接管数据获取与分析全流程。当本 skill 被触发时，数据获取类 skill 不应同时激活——分析已包含数据。
 
@@ -179,7 +179,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 每份报告输出为结构化 markdown，按此模板：
 
 ```
-# 标的名称 多维分析报告
+# 标的名称 综合分析报告
 
 > 数据日期：YYYY-MM-DD（Tushare 数据为 T-1 日）
 > 免责：本报告基于历史数据，不构成投资建议
@@ -265,8 +265,8 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 │       ├── 基础信息.md                        # stock_basic 接口文档
 │       ├── A股日线行情.md                     # daily 接口文档
 │       └── ...（其余接口文档见 references/，每个接口一文档）
-└── sxsc-tushare-analysis/                     # 分析 skill（负责多维分析）
-    ├── SKILL.md                               # 多维分析执行规范入口
+└── sxsc-tushare-analysis/                     # 分析 skill（负责综合分析）
+    ├── SKILL.md                               # 综合分析执行规范入口
     └── scripts/
         ├── common.py                          # 环境初始化与取数函数
         ├── basic_metrics.py                   # 基础指标（收益率/MA/波动率/夏普等）
