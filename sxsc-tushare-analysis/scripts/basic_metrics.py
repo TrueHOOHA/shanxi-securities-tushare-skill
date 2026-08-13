@@ -110,3 +110,52 @@ def flag_risks(stock_code, df_price, df_margin=None, df_holding=None):
         if rzye > rzye_prev * 1.1:
             risks.append("融资余额快速上升，杠杆情绪偏热")
     return risks
+
+
+def calc_holder_concentration(df_holders):
+    """股东户数时间序列分析——筹码集中度指标。
+    df_holders: stk_holdernumber 结果（含 end_date, holder_num），按 end_date 升序。
+    返回 dict：最新户数、近4季变化率、趋势判断、筹码集中度信号。
+    股东户数减少 = 筹码集中（主力吸筹），户数增加 = 筹码分散（主力派发）。
+    """
+    df = df_holders.sort_values("end_date").dropna(subset=["holder_num"])
+    if len(df) < 2:
+        return {"holder_num": "N/A", "trend": "数据不足", "signal": "N/A"}
+
+    latest = int(df["holder_num"].iloc[-1])
+    changes = df["holder_num"].pct_change() * 100
+    # 近4季变化率（取最近3-4期）
+    last_4 = df.tail(4)
+    qoq = []
+    for i in range(1, len(last_4)):
+        c = round((last_4["holder_num"].iloc[i] / last_4["holder_num"].iloc[i-1] - 1) * 100, 1)
+        qoq.append(f"{last_4['end_date'].iloc[i]}:{c:+.1f}%")
+
+    # 趋势判断：结合最近一期环比 与 整体变化率（中期趋势）
+    latest_chg = round(changes.iloc[-1], 1) if len(changes) > 0 else 0
+    # 中期（自监测以来）变化率
+    total_chg = round((df["holder_num"].iloc[-1] / df["holder_num"].iloc[0] - 1) * 100, 1)
+
+    if latest_chg < -3:
+        signal = "筹码集中（主力吸筹）"
+    elif latest_chg > 3:
+        signal = "筹码分散（主力派发）"
+    elif total_chg < -15:
+        signal = "中期筹码集中（户数显著下降）"
+    elif total_chg > 15:
+        signal = "中期筹码分散（户数显著上升）"
+    elif latest_chg < -1:
+        signal = "筹码缓慢集中"
+    elif latest_chg > 1:
+        signal = "筹码缓慢分散"
+    else:
+        signal = "筹码稳定"
+
+    # 结合股价：如果有 price_series 可做更深入判断，这里只输出户数变化
+    return {
+        "holder_num": latest,
+        "total_chg_pct": total_chg,
+        "latest_qoq": latest_chg,
+        "qoq_detail": " → ".join(qoq[-4:]),
+        "signal": signal,
+    }

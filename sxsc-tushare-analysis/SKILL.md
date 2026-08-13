@@ -58,7 +58,18 @@ description: >
 | 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_dailybasic` 取行业 PE/PB 均值）；**PE/PB 历史分位数**（取近 5 年 `daily_basic` 全量 → `percentile_rank` 计算） |
 | 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`** | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）** |
 | 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`** | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向 |
-| 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`** | 前十大股东/流通股东集中度、股东户数变化趋势、大股东增减持方向与比例 |
+| 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`** | 前十大股东/流通股东集中度、**股东户数时间序列分析（筹码集中度指标）**、大股东增减持方向与比例 |
+
+### 筹码集中度分析（股东户数时间序列）
+
+股东户数的时间序列变化是判断筹码集中/分散的核心指标，比单点数值更有意义：
+
+- **股东户数减少（筹码集中）**：人均持股数增加，通常代表主力资金在收集筹码、散户在离场。主力控盘度提高，股价上涨阻力变小。多见于庄股、机构重仓股、上涨初期。
+- **股东户数增加（筹码分散）**：人均持股数减少，通常代表主力在派发筹码、散户在跟风接盘。盘面抛压加重，股价容易下跌或陷入长期震荡。多见于热门股见顶、下跌初期或长期横盘区间。
+- **分析要点**：
+  - 对比近 4 个季度股东户数变化率，判断趋势方向
+  - 结合股价走势：户数持续下降 + 股价上涨 = 健康上涨（主力锁仓）；户数持续下降 + 股价下跌 = 主力被套（可能阶段见底）；户数持续上升 + 股价上涨 = 散户接盘（警惕见顶）
+  - 使用 `stk_holdernumber` 接口获取历史数据，按 `end_date` 排序后计算环比变化率
 | 7 | 两融/杠杆情绪 | `margin_detail`、`margin_secs` | 融资余额及变化率、融资买入额占比、融券余额；两融是否处于高位 |
 | 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst`、`stk_alert`、`stk_shock` | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖、异常波动提示 |
 | 9 | 解禁压力 | **`share_float`** | 未来 3 个月即将解禁股份数量及占比、解禁股东类型 |
