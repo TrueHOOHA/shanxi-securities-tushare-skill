@@ -82,7 +82,7 @@ description: >
 |---|------|---------|------------|
 | 1 | 概况 | `index_basic` | 发布方、基期、基点、加权方式、类别、成分股数量 |
 | 2 | 行情趋势 | `index_daily`、`index_weekly`、`index_monthly` | 近 20/60/250 日涨跌幅、MA 排列、年化波动率 |
-| 3 | 估值 | `index_dailybasic` | PE(TTM)、PB 历史分位数（近 5 年） |
+| 3 | 估值 | `index_dailybasic` | PE(TTM)、PB 历史分位数（近 5 年）。**注意：`index_dailybasic` 不覆盖科创板指数**（如科创50 000688.SH），此类指数估值需用成分股 `daily_basic` 聚合估算，或标注数据缺失 |
 | 4 | 成分权重 | `index_weight`、`index_member` | 前十大权重股及权重占比 |
 | 5 | 行业分布 | 成分股 + `index_classify` | 申万一级行业权重分布（前三行业占比） |
 | 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 全市场融资余额趋势、融资买入额/成交额占比 |
