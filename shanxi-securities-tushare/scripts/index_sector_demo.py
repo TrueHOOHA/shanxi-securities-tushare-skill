@@ -109,17 +109,21 @@ def get_index_member_http(index_code):
 #       N225（日经225）、HSI（恒生指数）、XIN9（富时A50）等，详见 references/国际指数.md
 # 不要写成 .DJI 或 ^DJI —— 该接口不使用点前缀
 def get_index_global_sdk(ts_codes, start_date, end_date):
-    """SDK 方式：国际指数行情（多指数逗号分隔）"""
-    return pro.index_global(
+    """SDK 方式：国际指数行情（多指数逗号分隔）
+    注意：返回数据为降序（最新在前），使用前须 .sort_values('trade_date')。
+    """
+    df = pro.index_global(
         ts_code=ts_codes, start_date=start_date, end_date=end_date,
         fields="ts_code,trade_date,close,open,high,low,pct_chg",
     )
+    return df.sort_values("trade_date").reset_index(drop=True)
 
 
 def get_index_global_http(ts_codes, start_date, end_date):
     """HTTP 方式：国际指数行情"""
-    return http_call(
+    df = http_call(
         "index_global",
         {"ts_code": ts_codes, "start_date": start_date, "end_date": end_date},
         "ts_code,trade_date,close,open,high,low,pct_chg",
     )
+    return df.sort_values("trade_date").reset_index(drop=True)

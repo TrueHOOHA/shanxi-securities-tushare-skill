@@ -86,7 +86,7 @@ description: >
 | 4 | 成分权重 | `index_weight`、`index_member` | 前十大权重股及权重占比 |
 | 5 | 行业分布 | 成分股 + `index_classify` | 申万一级行业权重分布（前三行业占比） |
 | 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 全市场融资余额趋势、融资买入额/成交额占比 |
-| 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比。**`index_global` 的 `ts_code` 无点前缀**（如 `DJI`/`SPX`/`IXIC`/`N225`/`HSI`，非 `.DJI`），代码格式需查 `references/国际指数.md` 文档 |
+| 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比。**`index_global` 的 `ts_code` 无点前缀**（如 `DJI`/`SPX`/`IXIC`/`N225`/`HSI`，非 `.DJI`），代码格式需查 `references/国际指数.md` 文档。**注意：`index_global` 返回数据为降序（最新在前），计算前必须 `.sort_values('trade_date')`，否则 `iloc` 索引取到的日期方向相反，导致涨跌幅方向错误** |
 
 ### 三、公募基金（8 个维度）
 
@@ -305,6 +305,7 @@ description: >
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。
+- **数据排序规范**：部分接口返回**降序**数据（最新在前，如 `index_global`、`fut_settle`），部分返回升序。**任何涉及 `iloc[-1]`（最新）或区间涨跌幅的计算前，必须先 `.sort_values('trade_date')` 确认方向**，否则取到相反日期导致结论方向错误。取数函数（如 `get_daily_for_period`）已内置排序，但直接调用 `pro.*` 时必须自行处理。
 
 ## 边缘情况处理
 
