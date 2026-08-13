@@ -86,7 +86,7 @@ description: >
 | 4 | 成分权重 | `index_weight`、`index_member` | 前十大权重股及权重占比 |
 | 5 | 行业分布 | 成分股 + `index_classify` | 申万一级行业权重分布（前三行业占比） |
 | 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 全市场融资余额趋势、融资买入额/成交额占比 |
-| 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比 |
+| 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比。**`index_global` 的 `ts_code` 无点前缀**（如 `DJI`/`SPX`/`IXIC`/`N225`/`HSI`，非 `.DJI`），代码格式需查 `references/国际指数.md` 文档 |
 
 ### 三、公募基金（8 个维度）
 
