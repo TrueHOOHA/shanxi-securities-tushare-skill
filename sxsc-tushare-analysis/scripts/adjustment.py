@@ -53,8 +53,10 @@ def apply_etf_adj(df_daily, df_adj):
     返回 df（trade_date 索引）增加 close_post 列（后复权收盘价 = close × adj_factor）。
     ETF 拆分（如 1拆2，adj_factor=2.0）会导致不复权价腰斩，
     直接算收益会严重失真，必须复权。fund_daily 返回的是不复权价。
-    ⚠️ ETF 的 adj_factor 常为归一化因子（如 ~0.34），close_post 绝对值无价格含义，
-    仅供计算收益/夏普/回撤等（scale 不变）使用；展示价格请用未复权 close。
+    ⚠️ ETF 的 fund_adj 因子口径与股票 adj_factor 不同（实测方向/量级不统一：
+    510500 ~0.34、512100 ~0.373、510300 ~1.27），close_post 绝对值非后复权价，
+    仅供计算收益/夏普/回撤等 scale-invariant 指标（全程同列，pct_change 与因子绝对值无关）；
+    展示价格请用未复权 close。
     """
     merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
     merged = merged.sort_values("trade_date").set_index("trade_date")
