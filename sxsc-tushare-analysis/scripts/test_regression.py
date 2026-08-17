@@ -15,8 +15,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from adjustment import (  # noqa: E402
-    apply_fund_adj, calc_percentile_rank, clean_panel, rebase_series,
-    valuation_percentiles, winsorize_cross_section,
+    _check_date_index, apply_fund_adj, calc_percentile_rank, clean_panel,
+    rebase_series, valuation_percentiles, winsorize_cross_section,
 )
 from attribution import calc_piotroski_fscore, calc_event_study  # noqa: E402
 from basic_metrics import calc_returns, calc_roe_trend, flag_risks  # noqa: E402
@@ -215,6 +215,39 @@ def test_boll_constant_no_false_breakout():
     """常量数据下布林带应识别为无波动，而非误报触及上轨。"""
     r = calc_boll(pd.Series([5.0] * 30), window=20)
     assert "无波动" in r["position"], "std=0 时应标注无波动，不应误报超买"
+
+
+def test_check_date_index_rejects_integer():
+    """整数索引应被拒绝，避免 rebase 产出无意义"日期"。"""
+    int_idx = pd.Series([1, 2, 3])  # RangeIndex 整数
+    raised = False
+    try:
+        _check_date_index(int_idx.index, "test")
+    except TypeError:
+        raised = True
+    assert raised, "整数索引应抛 TypeError"
+    # 日期字符串索引应通过
+    date_idx = pd.Series([1, 2, 3], index=["20260101", "20260102", "20260103"])
+    _check_date_index(date_idx.index, "test")  # 不抛
+
+
+def test_rebase_series_rejects_integer_index():
+    """rebase_series 传整数索引的 Series 应抛错而非产出假日期。"""
+    s_int = pd.Series([1, 2, 3, 4])  # RangeIndex
+    raised = False
+    try:
+        rebase_series({"A": s_int})
+    except TypeError:
+        raised = True
+    assert raised, "整数索引应被拒绝"
+
+
+def test_apply_fund_adj_returns_nav_date_index():
+    """apply_fund_adj 应返回 nav_date 索引（非整数），便于 rebase 直接使用。"""
+    nav = pd.DataFrame({"nav_date": ["d1", "d2", "d3"], "unit_nav": [1.0, 1.0, 1.0]})
+    adj = pd.DataFrame({"trade_date": ["d1", "d2", "d3"], "adj_factor": [1.0, 1.5, 2.0]})
+    out = apply_fund_adj(nav.copy(), adj)
+    assert list(out.index)[:2] == ["d1", "d2"], f"应为 nav_date 索引，得到 {list(out.index)}"
 
 
 def _run_all():
