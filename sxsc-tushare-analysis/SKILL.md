@@ -312,7 +312,7 @@ description: >
   - 价格必须用 `apply_etf_adj` 复权（`fund_adj` 复权因子校正），否则份额拆分/分红会导致不复权价严重失真
   - 基金接口字段名与股票不同，**必须查文档确认**（如 `fund_manager` 字段是 `name` 非 `manager_name`，`fund_div` 字段是 `div_cash` 非 `div_amount`）
 - **指数成分权重注意**：
-  - `index_weight` 的字段是 `trade_date`/`con_code`/`weight`，无 `con_name` 字段——需用 `con_code` 调 `stock_basic` 获取名称
+  - `index_weight` 的入参是 `index_code`（非 ts_code），输出字段为 `trade_date`/`con_code`/`weight`，无 `con_name` 字段——需用 `con_code` 调 `stock_basic` 获取名称
   - `index_weight` 为**月度数据**（月末发布）：取数需用**整月范围**（`start_date`=月初、`end_date`=月末），半月范围或未发布月份返回空；取最新一期权重：先按 `trade_date` 降序取最大日期，再按 `weight` 降序取前 N 行
 - **期货接口注意**：
   - 上期所交易所代码是 `SHFE`（非 SHF），大商所是 `DCE`，郑商所 `CZCE`，中金所 `CFFEX`
@@ -327,6 +327,11 @@ description: >
   - 其他接口（`daily`/`daily_basic`/`fina_indicator`/`stk_holdernumber` 等）正常可用
   - `fut_wsr` 用 `trade_date` + `symbol`（产品代码如 `JM`/`RB`），返回各仓库明细须按 `symbol` 汇总 `vol`；`ts_code` 参数无效
   - `fut_settle` 返回降序数据（最新在前），取最新行需 `iloc[0]`；最新交易日结算中时 settle/保证金率为 NaN，需 `dropna(subset=['settle'])` 取最近有值行
+- **宏观/市场接口参数注意**（参数风格不统一，易错）：
+  - `cn_cpi`/`cn_ppi` 用 `start_m`/`end_m`（**月份 YYYYMM，非 start_date/end_date**）；CPI 同比字段是 `nt_yoy`（非 nt_m），PPI 同比字段是 `ppi_yoy`（非 ppi）
+  - `shibor_lpr` 用标准 `start_date`/`end_date`（与 cn_cpi/cn_ppi 不同，勿混用）
+  - `margin`（全市场两融汇总）的交易所参数/字段是 `exchange_id`（非 `exchange`），`rzye` 单位为元
+- **指数成分权重参数注意**：`index_weight` 的入参是 `index_code`（**非 ts_code**，传 ts_code 会报 "index_code required"）；输出字段为 `trade_date`/`con_code`/`weight`
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。
