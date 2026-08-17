@@ -19,18 +19,31 @@ import requests
 # ============ 环境初始化 ============
 token = os.getenv("SXSC_TUSHARE_TOKEN")
 
-# --- 方式一：SDK 初始化（需要 sxsc_tushare 库） ---
-import sxsc_tushare as sx
-
-sx.set_token(token)
-pro = sx.get_api(env="prd")  # 'prd' 仿真, 'qa' 生产
-
 # --- 方式二：HTTP 初始化（无需 SDK） ---
+# SECURITY: HTTP_URL 为明文 HTTP，token 放在请求 body 中传输，存在被中间人
+# 窃取/篡改的风险。仅限在受控内网 / VPN 环境下使用 HTTP 模式；禁止在公网
+# 暴露该地址。若需公网访问，应自建 HTTPS 反向代理或要求服务端启用 TLS。
 HTTP_URL = "http://221.204.19.233:7172"
+
+# --- 方式一：SDK 初始化（需要 sxsc_tushare 库） ---
+# 条件导入：SDK 不存在时降级为 HTTP 模式，避免模块无法导入导致 HTTP 通道也失效。
+try:
+    import sxsc_tushare as sx
+
+    sx.set_token(token)
+    pro = sx.get_api(env="prd")  # 'prd' 仿真, 'qa' 生产
+    mode = "sdk"
+except ImportError:
+    pro = None
+    mode = "http"
 
 
 def http_call(api_name, params, fields):
-    """HTTP 通用调用，返回 DataFrame。api_name 必须先在接口对应表中确认。"""
+    """HTTP 通用调用，返回 DataFrame。api_name 必须先在接口对应表中确认。
+    注意：token 经明文 HTTP 传输，仅限受控内网/VPN 使用。
+    """
+    if not token:
+        raise RuntimeError("未设置环境变量 SXSC_TUSHARE_TOKEN，HTTP 模式不可用")
     resp = requests.post(
         HTTP_URL, json={"api_name": api_name, "token": token, "params": params, "fields": fields}
     )
@@ -42,8 +55,11 @@ def http_call(api_name, params, fields):
 
 # ============ 基础取数函数 ============
 def get_daily_sdk(ts_code, start_date, end_date):
-    """SDK 方式：日线行情"""
-    return pro.daily(
+    """SDK 方式：日线行情（仅 mode=sdk 时可用）"""
+    api = pro
+    if api is None:
+        raise RuntimeError("SDK 未初始化（未安装 sxsc_tushare），请改用 HTTP 模式")
+    return api.daily(
         ts_code=ts_code, start_date=start_date, end_date=end_date,
         fields="ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
     )
@@ -76,26 +92,41 @@ def get_daily_for_period(ts_code, end_date, periods=(5, 20, 60, 120, 250)):
     返回按 trade_date 升序、重置索引的 DataFrame。
     调用方无需关心 start_date——脚本按最大周期自动预留余量，
     避免「要 250 日却只取 249 日导致 N/A」的坑。
+    按 mode 自动选择 SDK / HTTP 通道。
     """
     start = calc_start_date(end_date, max(periods))
-    return get_daily_sdk(ts_code, start, end_date).sort_values("trade_date").reset_index(drop=True)
+    df = get_daily_sdk(ts_code, start, end_date) if mode == "sdk" else get_daily_http(ts_code, start, end_date)
+    return df.sort_values("trade_date").reset_index(drop=True)
 
 
 # ============ 场内基金（ETF）取数 ============
 def get_fund_daily_sdk(ts_code, start_date, end_date):
     """SDK 方式：场内基金日线行情（ETF 必须用 fund_daily，不能用 daily——daily 对 ETF 返回空）"""
-    return pro.fund_daily(
+    api = pro
+    if api is None:
+        raise RuntimeError("SDK 未初始化（未安装 sxsc_tushare），请改用 HTTP 模式")
+    return api.fund_daily(
         ts_code=ts_code, start_date=start_date, end_date=end_date,
         fields="ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
     )
 
 
+def get_fund_daily_http(ts_code, start_date, end_date):
+    """HTTP 方式：场内基金日线行情（ETF 用 fund_daily 接口）"""
+    return http_call(
+        "fund_daily",
+        {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
+    )
+
+
 def get_fund_daily_for_period(ts_code, end_date, periods=(5, 20, 60, 120, 250)):
     """场内基金（ETF）取足最大周期的日线数据，自动推算起始日期。
-    与 get_daily_for_period 同理，但用 fund_daily 接口。
+    与 get_daily_for_period 同理，但用 fund_daily 接口。按 mode 自动选择通道。
     """
     start = calc_start_date(end_date, max(periods))
-    return get_fund_daily_sdk(ts_code, start, end_date).sort_values("trade_date").reset_index(drop=True)
+    df = get_fund_daily_sdk(ts_code, start, end_date) if mode == "sdk" else get_fund_daily_http(ts_code, start, end_date)
+    return df.sort_values("trade_date").reset_index(drop=True)
 
 
 # ============ 报告片段示例 ============

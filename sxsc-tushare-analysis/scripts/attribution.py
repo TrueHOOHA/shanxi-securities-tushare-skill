@@ -36,56 +36,112 @@ def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
 
 
 # ============ 财务健康评分：Piotroski F-Score ============
-def calc_piotroski_fscore(df_fina, df_income, df_cashflow):
+def _filter_annual(df, date_col="end_date"):
+    """筛年报并去重：保留 end_date 以 '1231' 结尾的年报，同报告期保留最新公告。"""
+    if df is None or len(df) == 0:
+        return df
+    df = df[df[date_col].astype(str).str.endswith("1231")].copy()
+    if df.empty:
+        return df
+    if "ann_date" in df.columns:
+        df = df.sort_values(["end_date", "ann_date"]).drop_duplicates(date_col, keep="last")
+    else:
+        df = df.drop_duplicates(date_col, keep="last")
+    return df.sort_values(date_col)
+
+
+def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     """Piotroski F-Score（0-9 分）。
-    需要 2 期年报数据（当期 + 去年同期）。
-    df_fina: fina_indicator 结果（含 roe, grossprofit_margin）
-    df_income: income 结果（含 total_revenue, n_income_attr_p）
+    需要 2 期年报数据（当期 + 去年同期）。各表先按 end_date 筛年报(1231)、
+    去重后取最近 2 期对比，避免拿 Q3 与 Q2 比导致的非同比错误。
+
+    df_fina: fina_indicator 结果（含 roa, grossprofit_margin, debt_to_assets,
+             current_ratio, assets_turn；均为接口预计算字段）
+    df_income: income 结果（含 n_income_attr_p）
     df_cashflow: cashflow 结果（含 n_cashflow_act）
-    各项均按 end_date 排序后取最近 2 期对比。
+    df_balances: balancesheet 结果（含 total_share），用于判断是否新增股本；
+                 可选，缺失则第 7 项计 0 分并标注数据缺失。
+
+    9 项标准：
+      盈利能力   1) ROA>0  2) 经营现金流>0  3) ΔROA>0  4) 经营现金流>净利润(应计质量)
+      杠杆/流动/融资 5) Δ资产负债率≤0  6) Δ流动比率>0  7) 未新增股本(Δtotal_share≤0)
+      运营效率   8) Δ毛利率>0  9) Δ总资产周转率>0
     """
-    df_fina = df_fina.sort_values("end_date").tail(2)
-    df_income = df_income.sort_values("end_date").tail(2)
-    df_cashflow = df_cashflow.sort_values("end_date").tail(2)
+    df_fina = _filter_annual(df_fina)
+    df_income = _filter_annual(df_income)
+    df_cashflow = _filter_annual(df_cashflow)
+    df_balances = _filter_annual(df_balances) if df_balances is not None else None
 
     score = 0
     details = []
 
-    # 1. 净利润为正
-    ni = df_income["n_income_attr_p"].iloc[-1]
-    s = ni > 0
-    score += s; details.append(f"净利润为正: {'是' if s else '否'}")
+    def _val(df, col, pos):
+        if df is None or col not in df.columns or len(df) < abs(pos):
+            return None
+        v = df[col].iloc[pos]
+        return v if pd.notna(v) else None
 
-    # 2. 经营现金流为正
-    cfo = df_cashflow["n_cashflow_act"].iloc[-1]
-    s = cfo > 0
-    score += s; details.append(f"经营现金流为正: {'是' if s else '否'}")
+    CUR, PREV = -1, -2
 
-    # 3. ROA 上升（用 ROE 近似）
-    if len(df_fina) >= 2:
-        s = df_fina["roe"].iloc[-1] > df_fina["roe"].iloc[-2]
+    # 1. ROA > 0
+    roa = _val(df_fina, "roa", CUR)
+    s = roa is not None and roa > 0
+    score += s; details.append(f"ROA>0: {'是' if s else ('否' if roa is not None else '数据缺失')}")
+
+    # 2. 经营现金流 > 0
+    cfo = _val(df_cashflow, "n_cashflow_act", CUR)
+    s = cfo is not None and cfo > 0
+    score += s; details.append(f"经营现金流>0: {'是' if s else ('否' if cfo is not None else '数据缺失')}")
+
+    # 3. ΔROA > 0
+    roa_prev = _val(df_fina, "roa", PREV)
+    if roa is None or roa_prev is None:
+        details.append("ΔROA>0: 数据不足")
     else:
-        s = False
-    score += s; details.append(f"ROE 上升: {'是' if s else '否'}")
+        s = roa > roa_prev; score += s; details.append(f"ΔROA>0: {'是' if s else '否'}")
 
-    # 4. CFO > 净利润（盈利质量）
-    s = cfo > ni
-    score += s; details.append(f"现金流>净利润: {'是' if s else '否'}")
-
-    # 5. 毛利率上升
-    if len(df_fina) >= 2:
-        s = df_fina["grossprofit_margin"].iloc[-1] > df_fina["grossprofit_margin"].iloc[-2]
+    # 4. 经营现金流 > 净利润（盈利质量）
+    ni = _val(df_income, "n_income_attr_p", CUR)
+    if cfo is None or ni is None:
+        details.append("现金流>净利润: 数据缺失")
     else:
-        s = False
-    score += s; details.append(f"毛利率上升: {'是' if s else '否'}")
+        s = cfo > ni; score += s; details.append(f"现金流>净利润: {'是' if s else '否'}")
 
-    # 6. 资产周转率上升（营收/总资产）
-    if len(df_income) >= 2 and "total_revenue" in df_income.columns:
-        rev_growth = df_income["total_revenue"].iloc[-1] / df_income["total_revenue"].iloc[-2]
-        s = rev_growth > 1
+    # 5. Δ资产负债率 ≤ 0（杠杆下降）
+    da = _val(df_fina, "debt_to_assets", CUR); da_prev = _val(df_fina, "debt_to_assets", PREV)
+    if da is None or da_prev is None:
+        details.append("Δ资产负债率≤0: 数据不足")
     else:
-        s = False
-    score += s; details.append(f"营收增长: {'是' if s else '否'}")
+        s = da <= da_prev; score += s; details.append(f"Δ资产负债率≤0: {'是' if s else '否'}")
+
+    # 6. Δ流动比率 > 0
+    cr = _val(df_fina, "current_ratio", CUR); cr_prev = _val(df_fina, "current_ratio", PREV)
+    if cr is None or cr_prev is None:
+        details.append("Δ流动比率>0: 数据不足")
+    else:
+        s = cr > cr_prev; score += s; details.append(f"Δ流动比率>0: {'是' if s else '否'}")
+
+    # 7. 未新增股本
+    sh = _val(df_balances, "total_share", CUR) if df_balances is not None else None
+    sh_prev = _val(df_balances, "total_share", PREV) if df_balances is not None else None
+    if sh is None or sh_prev is None:
+        details.append("未新增股本: 数据缺失(未提供资产负债表)")
+    else:
+        s = sh <= sh_prev; score += s; details.append(f"未新增股本: {'是' if s else '否'}")
+
+    # 8. Δ毛利率 > 0
+    gm = _val(df_fina, "grossprofit_margin", CUR); gm_prev = _val(df_fina, "grossprofit_margin", PREV)
+    if gm is None or gm_prev is None:
+        details.append("Δ毛利率>0: 数据不足")
+    else:
+        s = gm > gm_prev; score += s; details.append(f"Δ毛利率>0: {'是' if s else '否'}")
+
+    # 9. Δ总资产周转率 > 0
+    at = _val(df_fina, "assets_turn", CUR); at_prev = _val(df_fina, "assets_turn", PREV)
+    if at is None or at_prev is None:
+        details.append("Δ总资产周转率>0: 数据不足")
+    else:
+        s = at > at_prev; score += s; details.append(f"Δ总资产周转率>0: {'是' if s else '否'}")
 
     rating = "强" if score >= 7 else ("弱" if score <= 2 else "中等")
     return {"F-Score": score, "rating": rating, "details": details}
@@ -122,5 +178,5 @@ def calc_event_study(stock_returns, market_returns, event_date, window_before=30
         "CAR(累计异常收益%)": car,
         "事件窗口AR均值%": round(float(ar.mean()) * 100, 2),
         "Beta(估计窗口)": round(beta, 2),
-        "interpretation": f"事件{'正向显著' if car > 2 else ('负向显著' if car < -2 else '无显著影响')}",
+        "interpretation": f"事件 CAR {'偏正(>2%)' if car > 2 else ('偏负(<-2%)' if car < -2 else '影响不明显')}（阈值判断，未做 t 检验/置信区间）",
     }

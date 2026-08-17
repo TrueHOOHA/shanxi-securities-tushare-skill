@@ -85,28 +85,37 @@ def calc_information_ratio(stock_returns, benchmark_returns, periods=250):
 
 
 def calc_roe_trend(df):
-    """ROE 趋势。df: fina_indicator 结果，按 end_date 排序。"""
-    df = df.sort_values("end_date")
-    return df[["end_date", "roe", "grossprofit_margin", "netprofit_margin"]].head(8)
+    """ROE 趋势。df: fina_indicator 结果，返回最近 8 期（按 end_date 升序）。
+    按 end_date 去重（fina_indicator 同报告期可能返回多条不同 report_type 行）。
+    """
+    df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
+    return df[["end_date", "roe", "grossprofit_margin", "netprofit_margin"]].tail(8)
 
 
 def calc_revenue_growth(df):
-    """营收/利润同比增速。df: income 结果（含 total_revenue, n_income_attr_p）。"""
-    df = df.sort_values("end_date")
+    """营收/利润同比增速。df: income 结果（含 total_revenue, n_income_attr_p）。
+    假设传入为季度报告序列，pct_change(4) 即同报告期去年同期的同比口径；
+    若传入年度数据应改用 pct_change(1)。先按 end_date 去重，避免重复报告期失真。
+    """
+    df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
     df["rev_yoy"] = df["total_revenue"].pct_change(4) * 100
     df["profit_yoy"] = df["n_income_attr_p"].pct_change(4) * 100
     return df[["end_date", "rev_yoy", "profit_yoy"]].tail(8)
 
 
 def flag_risks(stock_code, df_price, df_margin=None, df_holding=None):
-    """风险信号汇总（示例规则，Agent 可按需扩展）。"""
+    """风险信号汇总（示例规则，Agent 可按需扩展）。
+    输入 DataFrame 按各接口原始顺序即可，函数内部统一按 trade_date 升序后再取最新值。
+    """
     risks = []
+    df_price = df_price.sort_values("trade_date")
     ret = df_price["pct_chg"]
     if ret.tail(20).abs().mean() > 5:
         risks.append("近20日日波动偏大，价格波动风险高")
     if df_margin is not None and len(df_margin) > 1:
-        rzye = df_margin["rzye"].iloc[-1]
-        rzye_prev = df_margin["rzye"].iloc[-2]
+        m = df_margin.sort_values("trade_date")
+        rzye = m["rzye"].iloc[-1]
+        rzye_prev = m["rzye"].iloc[-2]
         if rzye > rzye_prev * 1.1:
             risks.append("融资余额快速上升，杠杆情绪偏热")
     return risks
@@ -116,7 +125,8 @@ def calc_holder_concentration(df_holders):
     """股东户数时间序列分析——筹码集中度指标。
     df_holders: stk_holdernumber 结果（含 end_date, holder_num），按 end_date 升序。
     返回 dict：最新户数、近4季变化率、趋势判断、筹码集中度信号。
-    股东户数减少 = 筹码集中（主力吸筹），户数增加 = 筹码分散（主力派发）。
+    注意：户数变化仅为相关性信号，不能直接断言主力吸筹/派发；减少与筹码集中方向一致、
+    增加与分散方向一致，需结合成交、股价走势与股东结构交叉验证。
     """
     df = df_holders.sort_values("end_date").dropna(subset=["holder_num"])
     if len(df) < 2:
@@ -137,17 +147,17 @@ def calc_holder_concentration(df_holders):
     total_chg = round((df["holder_num"].iloc[-1] / df["holder_num"].iloc[0] - 1) * 100, 1)
 
     if latest_chg < -3:
-        signal = "筹码集中（主力吸筹）"
+        signal = "筹码趋于集中（户数下降，需结合量价验证）"
     elif latest_chg > 3:
-        signal = "筹码分散（主力派发）"
+        signal = "筹码趋于分散（户数上升，需结合量价验证）"
     elif total_chg < -15:
-        signal = "中期筹码集中（户数显著下降）"
+        signal = "中期筹码趋于集中（户数显著下降）"
     elif total_chg > 15:
-        signal = "中期筹码分散（户数显著上升）"
+        signal = "中期筹码趋于分散（户数显著上升）"
     elif latest_chg < -1:
-        signal = "筹码缓慢集中"
+        signal = "筹码缓慢趋于集中"
     elif latest_chg > 1:
-        signal = "筹码缓慢分散"
+        signal = "筹码缓慢趋于分散"
     else:
         signal = "筹码稳定"
 

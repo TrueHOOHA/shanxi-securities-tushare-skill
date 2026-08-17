@@ -31,8 +31,10 @@ def apply_fund_adj(df_nav, df_adj):
     merged = df_nav.merge(
         df_adj[["trade_date", "adj_factor"]].rename(columns={"trade_date": "nav_date"}),
         on="nav_date", how="left"
-    )
-    latest_factor = merged["adj_factor"].iloc[0] if not merged.empty else 1.0
+    ).sort_values("nav_date").reset_index(drop=True)
+    latest_factor = merged["adj_factor"].iloc[-1] if not merged.empty else 1.0
+    if pd.isna(latest_factor):
+        latest_factor = 1.0
     merged["adj_nav"] = merged["unit_nav"] * merged["adj_factor"] / latest_factor
     return merged
 
@@ -54,12 +56,15 @@ def apply_etf_adj(df_daily, df_adj):
 def rebase_series(series_dict, base_date=None):
     """多标的序列归一化（rebase 到基准日=100）。
     series_dict: {label: Series}，每个 Series 索引为日期、值为复权价或净值。
-    base_date: 基准日字符串 YYYYMMDD，默认取各序列最早公共日期。
+    base_date: 基准日字符串 YYYYMMDD，默认取各序列最早公共日期（即所有序列都有数据的最早一天）。
     返回归一化后的 DataFrame，每列=一个标的，基准日=100。
     """
-    df = pd.DataFrame(series_dict)
+    df = pd.DataFrame(series_dict).sort_index()
+    common = df.dropna()
+    if common.empty:
+        return df
     if base_date is None:
-        base_date = df.index[0]
+        base_date = common.index[0]
     base_val = df.loc[base_date]
     return (df / base_val * 100).round(2)
 
@@ -88,6 +93,8 @@ def calc_percentile_rank(value, historical_series):
     返回 0-100 的百分位数，如 85 表示当前值高于历史 85% 的时间。
     """
     arr = np.array(historical_series.dropna())
+    if len(arr) == 0:
+        return None
     rank = (arr < value).sum() / len(arr) * 100
     return round(rank, 1)
 
@@ -109,3 +116,66 @@ def calc_zscore(values, benchmark_series=None):
     z = round(float(z), 2)
     flag = "显著偏高" if z > 1.96 else ("显著偏低" if z < -1.96 else "正常范围")
     return {"Z-Score": z, "interpretation": flag}
+
+
+# ============ 因子加工借鉴：清洗 / 去极值 / 截面分位 ============
+# 说明：分析 skill 非"全市场因子流水线"，仅借鉴其中对分析有用的三步：
+#   ① clean_panel        —— 统一清洗带日期的面板（财务三表/估值面板）
+#   ② winsorize_cross_section —— 截面去极值，仅用于截面均值/标准化前
+#   ③ valuation_percentiles    —— 估值双口径分位（历史分位 + 同业截面分位）
+# 注意：② 严禁用于 VaR/CVaR、偏度/峰度、最大回撤等刻画尾部的指标。
+
+
+def clean_panel(df, date_col="end_date", value_cols=None, dedup=True, sort_asc=True):
+    """统一清洗带日期的面板数据（财务三表/估值面板等）。
+    - 去重：同 date_col 保留最新公告（ann_date 最大）的行
+    - 排序：按 date_col 升序
+    - 数值列：value_cols 强制转 numeric（非数→NaN），便于后续计算
+    返回清洗后的 DataFrame（原始 df 不被修改）。
+    """
+    if df is None or len(df) == 0:
+        return df
+    out = df.copy()
+    if dedup and date_col in out.columns:
+        keys = [date_col] + (["ann_date"] if "ann_date" in out.columns else [])
+        out = out.sort_values(keys).drop_duplicates(date_col, keep="last")
+    if sort_asc and date_col in out.columns:
+        out = out.sort_values(date_col).reset_index(drop=True)
+    cols = value_cols if value_cols is not None else [c for c in out.columns if c not in (date_col, "ann_date", "ts_code")]
+    for c in cols:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out
+
+
+def winsorize_cross_section(series, method="mad", k=3.0):
+    """截面去极值：对一组截面值（如某日行业成分股 PE）做 3σ-MAD 或 1/99 百分位截断。
+    仅用于截面均值/标准化前，避免单只异常股拉偏行业均值或 Z-Score。
+    【禁止】用于 VaR/CVaR、偏度/峰度、最大回撤等刻画尾部的指标——会抹掉真实尾部信息。
+    """
+    s = pd.Series(series).dropna()
+    if len(s) < 5:
+        return s
+    if method == "mad":
+        med = s.median()
+        mad = (s - med).abs().median()
+        if mad == 0:
+            return s
+        spread = k * 1.4826 * mad
+        lower, upper = med - spread, med + spread
+    else:
+        lower, upper = s.quantile(0.01), s.quantile(0.99)
+    return s.clip(lower, upper)
+
+
+def valuation_percentiles(value, historical_series, cross_section_series):
+    """估值双口径分位：历史分位 + 同业截面分位（值高于参考集多少比例，0-100）。
+    - historical_series：该标的自身近 N 年该指标序列（时序分位，calc_percentile_rank）
+    - cross_section_series：当日同行业/同类标的该指标截面（截面分位）
+    双口径交叉判断：双双偏高=贵、双双偏低=便宜、背离=相对自身历史与相对同业不一致（需找原因）。
+    方向由调用方按指标语义解读（PE 高=偏贵；ROE 高=偏优），函数只返回中性分位数。
+    """
+    return {
+        "历史分位": calc_percentile_rank(value, historical_series),
+        "截面分位": calc_percentile_rank(value, cross_section_series),
+    }

@@ -78,11 +78,13 @@ def main():
         print(CACHE_FILE)
         return 0
 
-    # 缓存命中（token_set=true）则直接复用，无需重复检测
+    # 缓存命中时复用 SDK 信息，但 token 始终实时校验
+    # （用户可能已删除/更换环境变量中的 token，不能仅凭缓存判定可用）
     if not args.force and not args.check:
         cached = load_cache()
-        if cached and cached.get("token_set"):
-            print("使用缓存校验结果：")
+        token_now = bool(os.getenv(TOKEN_ENV))
+        if cached and cached.get("token_set") and token_now:
+            print("使用缓存校验结果（token 已实时确认）：")
             print(json.dumps(cached, ensure_ascii=False, indent=2))
             if not cached.get("sdk_available"):
                 print("\n提示：未安装 sxsc_tushare 库，将使用 HTTP 协议方式调取数据。")

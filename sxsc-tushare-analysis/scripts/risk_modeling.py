@@ -19,6 +19,8 @@ def calc_var_cvar(returns, confidence=(0.95, 0.99)):
     CVaR = 超过 VaR 的平均损失（尾部期望损失），比 VaR 更保守。
     """
     ret = np.asarray(returns.dropna(), dtype=float)
+    if len(ret) == 0:
+        return {"status": "数据不足"}
     results = {}
     for c in confidence:
         var = round(np.percentile(ret, (1 - c) * 100), 4)
@@ -84,16 +86,14 @@ def calc_amihud_illiquidity(price_returns, dollar_volume):
     """Amihud 非流动性指标 = |日收益率| / 日成交额（百万元）。
     衡量单位资金引起的价格变动，值越大 = 流动性越差。
     dollar_volume: 日成交额，单位为元（如 daily.amount 来自数据接口，其单位为千元，需先 ×1000 转元）。
+    收益与成交额按日期对齐后联合 dropna，避免缺失值不在同一行时按位置错配。
     """
-    ret = np.asarray(np.abs(price_returns).dropna(), dtype=float)
-    vol = np.asarray(dollar_volume.reindex(price_returns.index).dropna(), dtype=float)
-    min_len = min(len(ret), len(vol))
-    if min_len == 0:
+    df = pd.DataFrame({"ret": np.abs(price_returns), "vol": dollar_volume}).dropna()
+    if len(df) == 0:
         return None
-    ret = ret[:min_len]
-    vol = vol[:min_len].copy()
+    vol = df["vol"].copy()
     vol[vol == 0] = 1e-10
-    illiq = ret / (vol / 1e6)
+    illiq = df["ret"] / (vol / 1e6)
     mean_illiq = round(float(illiq.mean()), 6)
     return {
         "Amihud非流动性": mean_illiq,
@@ -112,15 +112,17 @@ def calc_rolling_beta(stock_returns, market_returns, window=60):
     stock = np.asarray(aligned["stock"], dtype=float)
     market = np.asarray(aligned["market"], dtype=float)
     betas = []
-    for i in range(window, len(aligned)):
+    for i in range(window, len(aligned) + 1):
         s = stock[i - window:i]
         m = market[i - window:i]
         v = np.var(m)
         if v > 0:
             betas.append(np.cov(s, m)[0, 1] / v)
-    if len(betas) < 2:
+    if len(betas) == 0:
         return None
     latest = round(betas[-1], 2)
+    if len(betas) < 2:
+        return {"当前Beta": latest, "趋势": "数据不足(仅1个窗口)", f"窗口{window}日": True}
     trend = "上升" if betas[-1] > betas[0] else "下降"
     return {"当前Beta": latest, "趋势": trend, f"窗口{window}日": True}
 
@@ -131,12 +133,14 @@ def calc_rolling_sharpe(df_nav, window=60, periods=250, risk_free=0.02):
     if len(ret) < window:
         return None
     sharpes = []
-    for i in range(window, len(ret)):
+    for i in range(window, len(ret) + 1):
         s = ret.iloc[i - window:i]
         if s.std() > 0:
             sharpes.append((s.mean() * periods - risk_free) / (s.std() * np.sqrt(periods)))
-    if len(sharpes) < 2:
+    if len(sharpes) == 0:
         return None
+    if len(sharpes) < 2:
+        return {"当前滚动夏普": round(sharpes[-1], 2), "趋势": "数据不足(仅1个窗口)"}
     return {
         "当前滚动夏普": round(sharpes[-1], 2),
         "趋势": "上升" if sharpes[-1] > sharpes[0] else "下降",
