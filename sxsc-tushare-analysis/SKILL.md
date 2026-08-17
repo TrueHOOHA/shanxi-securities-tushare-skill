@@ -335,6 +335,7 @@ description: >
 - **指数成分权重参数注意**：`index_weight` 的入参是 `index_code`（**非 ts_code**，传 ts_code 会报 "index_code required"）；输出字段为 `trade_date`/`con_code`/`weight`
 - 日期格式统一 `YYYYMMDD`。
 - 未来日期自动裁剪到最近可用日期并提示用户。
+- **T-0 占位行处理**：Tushare 数据为 T-1，`end_date` 传当天时行情接口（`daily`/`fund_daily`/`index_daily` 等）会返回当天行但全字段为 NaN（T-0 数据未出）。取数后必须 `dropna(subset=['close'])` 去掉占位行，否则 `iloc[-1]` 取到 NaN 导致后续计算全错。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。
 - **数据排序规范**：所有 `pro.*` 接口均返回**降序**数据（最新在前），包括 `index_daily`、`daily`、`index_global`、`fut_settle` 等。**任何涉及 `iloc[-1]`（取最新）或区间涨跌幅的计算前，必须先 `.sort_values('trade_date')` 确认升序**，否则取到的日期方向相反，导致结论方向错误。取数函数（如 `get_daily_for_period`）已内置排序，但直接调用 `pro.*` 时必须自行处理。
 
