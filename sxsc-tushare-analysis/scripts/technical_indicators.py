@@ -18,6 +18,8 @@ def calc_macd(df_close, fast=12, slow=26, signal=9):
     dif = ema_fast - ema_slow
     dea = dif.ewm(span=signal, adjust=False).mean()
     macd_bar = (dif - dea) * 2
+    if len(dif) == 0:
+        return {"DIF": "N/A", "DEA": "N/A", "MACD": "N/A", "signal": "数据不足"}
     if len(dif) < 2:
         cross = "数据不足"
     elif dif.iloc[-1] > dea.iloc[-1] and dif.iloc[-2] <= dea.iloc[-2]:
@@ -88,6 +90,9 @@ def calc_boll(df_close, window=20, num_std=2):
     if np.isnan(up) or np.isnan(lo):
         return {"上轨": "N/A", "中轨": "N/A", "下轨": "N/A", "position": "数据不足"}
     up = round(float(up), 2); lo = round(float(lo), 2); md = round(float(md), 2)
+    std_last = std.iloc[-1]
+    if not np.isnan(std_last) and std_last == 0:
+        return {"上轨": up, "中轨": md, "下轨": lo, "position": "无波动(区间恒定)"}
     pos = "触及上轨（超买）" if price >= up * 0.98 else (
           "触及下轨（超卖）" if price <= lo * 1.02 else "中轨附近")
     return {"上轨": up, "中轨": md, "下轨": lo, "position": pos}
@@ -105,8 +110,10 @@ def calc_obv(df_close, df_vol):
 
 def calc_volume_ratio(df_vol, window=5):
     """量比 = 当日成交量 / 近 N 日平均成交量。"""
+    if len(df_vol) == 0:
+        return None
     ma_vol = df_vol.tail(window + 1).head(window).mean()
-    if ma_vol == 0:
+    if ma_vol == 0 or (isinstance(ma_vol, float) and np.isnan(ma_vol)):
         return None
     ratio = df_vol.iloc[-1] / ma_vol
     flag = "放量" if ratio > 2 else ("缩量" if ratio < 0.5 else "正常")

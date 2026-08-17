@@ -14,7 +14,11 @@ def calc_returns(df_close, periods=(5, 20, 60, 120, 250)):
     返回 dict：键为「最新收盘」和 f"近{p}日涨幅%"，调用时用字符串键，
     不要用整数 p 直接访问（如 out["近20日涨幅%"]，而非 out[20]）。
     """
+    if len(df_close) == 0:
+        return {"最新收盘": "N/A"}
     latest = df_close.iloc[-1]
+    if isinstance(latest, float) and np.isnan(latest):
+        return {"最新收盘": "N/A"}
     out = {"最新收盘": round(float(latest), 2)}
     for p in periods:
         if len(df_close) > p:

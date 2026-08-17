@@ -19,11 +19,11 @@ from adjustment import (  # noqa: E402
     valuation_percentiles, winsorize_cross_section,
 )
 from attribution import calc_piotroski_fscore, calc_event_study  # noqa: E402
-from basic_metrics import calc_roe_trend, flag_risks  # noqa: E402
+from basic_metrics import calc_returns, calc_roe_trend, flag_risks  # noqa: E402
 from risk_modeling import (  # noqa: E402
     calc_amihud_illiquidity, calc_rolling_beta, calc_var_cvar,
 )
-from technical_indicators import calc_boll, calc_macd, calc_obv, calc_rsi  # noqa: E402
+from technical_indicators import calc_boll, calc_macd, calc_obv, calc_rsi, calc_volume_ratio  # noqa: E402
 
 
 def test_obv_short_data_no_crash():
@@ -196,6 +196,25 @@ def test_fscore_financial_firm_comp_note():
     assert r["comp_note"] is not None and "金融机构" in r["comp_note"], "券商应触发金融业弱参考提示"
     assert r["有效项"] + r["缺失项"] == 9
     assert any("ROA>0: 是" in d for d in r["details"]), "npta 兜底后 ROA>0 应为是"
+
+
+def test_calc_returns_empty_and_nan_no_crash():
+    """空序列/全 NaN 不应崩，应返回 N/A 而非裸 NaN。"""
+    assert calc_returns(pd.Series([], dtype=float))["最新收盘"] == "N/A"
+    assert calc_returns(pd.Series([np.nan] * 30))["最新收盘"] == "N/A"
+
+
+def test_macd_volume_ratio_empty_no_crash():
+    """MACD/量比 空序列不应抛 IndexError。"""
+    e = pd.Series([], dtype=float)
+    assert calc_macd(e)["signal"] == "数据不足"
+    assert calc_volume_ratio(e) is None
+
+
+def test_boll_constant_no_false_breakout():
+    """常量数据下布林带应识别为无波动，而非误报触及上轨。"""
+    r = calc_boll(pd.Series([5.0] * 30), window=20)
+    assert "无波动" in r["position"], "std=0 时应标注无波动，不应误报超买"
 
 
 def _run_all():

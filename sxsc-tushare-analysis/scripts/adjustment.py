@@ -114,6 +114,8 @@ def calc_zscore(values, benchmark_series=None):
     if benchmark_series is None:
         return None
     arr = np.asarray(benchmark_series, dtype=float)
+    if len(arr) == 0:
+        return None
     mean = arr.mean()
     std = arr.std()
     if std == 0:
