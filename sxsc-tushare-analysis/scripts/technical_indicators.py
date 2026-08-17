@@ -27,9 +27,9 @@ def calc_macd(df_close, fast=12, slow=26, signal=9):
     else:
         cross = "多头排列" if dif.iloc[-1] > dea.iloc[-1] else "空头排列"
     return {
-        "DIF": round(dif.iloc[-1], 2),
-        "DEA": round(dea.iloc[-1], 2),
-        "MACD": round(macd_bar.iloc[-1], 2),
+        "DIF": round(float(dif.iloc[-1]), 2),
+        "DEA": round(float(dea.iloc[-1]), 2),
+        "MACD": round(float(macd_bar.iloc[-1]), 2),
         "signal": cross,
     }
 
@@ -46,7 +46,7 @@ def calc_rsi(df_close, period=14):
     val = rsi.iloc[-1]
     if np.isnan(val):
         return {"RSI": "N/A", "signal": "数据不足"}
-    val = round(val, 1)
+    val = round(float(val), 1)
     flag = "超买" if val > 70 else ("超卖" if val < 30 else "中性")
     return {"RSI": val, "signal": flag}
 
@@ -65,9 +65,9 @@ def calc_kdj(df_high, df_low, df_close, period=9):
     if np.isnan(k.iloc[-1]) or np.isnan(d.iloc[-1]):
         return {"K": "N/A", "D": "N/A", "J": "N/A", "signal": "数据不足"}
     return {
-        "K": round(k.iloc[-1], 2),
-        "D": round(d.iloc[-1], 2),
-        "J": round(j.iloc[-1], 2),
+        "K": round(float(k.iloc[-1]), 2),
+        "D": round(float(d.iloc[-1]), 2),
+        "J": round(float(j.iloc[-1]), 2),
         "signal": "金叉" if k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2] else
                   ("死叉" if k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2] else "无叉"),
     }
@@ -87,7 +87,7 @@ def calc_boll(df_close, window=20, num_std=2):
     md = mid.iloc[-1]
     if np.isnan(up) or np.isnan(lo):
         return {"上轨": "N/A", "中轨": "N/A", "下轨": "N/A", "position": "数据不足"}
-    up = round(up, 2); lo = round(lo, 2); md = round(md, 2)
+    up = round(float(up), 2); lo = round(float(lo), 2); md = round(float(md), 2)
     pos = "触及上轨（超买）" if price >= up * 0.98 else (
           "触及下轨（超卖）" if price <= lo * 1.02 else "中轨附近")
     return {"上轨": up, "中轨": md, "下轨": lo, "position": pos}
@@ -100,7 +100,7 @@ def calc_obv(df_close, df_vol):
     direction = np.where(df_close.diff() > 0, 1, np.where(df_close.diff() < 0, -1, 0))
     obv = (direction * df_vol).cumsum()
     trend = "上升" if obv.iloc[-1] > obv.iloc[-5] else ("下降" if obv.iloc[-1] < obv.iloc[-5] else "持平")
-    return {"OBV": round(obv.iloc[-1], 0), "trend": trend}
+    return {"OBV": round(float(obv.iloc[-1]), 0), "trend": trend}
 
 
 def calc_volume_ratio(df_vol, window=5):
@@ -110,4 +110,4 @@ def calc_volume_ratio(df_vol, window=5):
         return None
     ratio = df_vol.iloc[-1] / ma_vol
     flag = "放量" if ratio > 2 else ("缩量" if ratio < 0.5 else "正常")
-    return {"量比": round(ratio, 2), "signal": flag}
+    return {"量比": round(float(ratio), 2), "signal": flag}

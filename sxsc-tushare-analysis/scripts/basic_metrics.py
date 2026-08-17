@@ -15,10 +15,10 @@ def calc_returns(df_close, periods=(5, 20, 60, 120, 250)):
     不要用整数 p 直接访问（如 out["近20日涨幅%"]，而非 out[20]）。
     """
     latest = df_close.iloc[-1]
-    out = {"最新收盘": round(latest, 2)}
+    out = {"最新收盘": round(float(latest), 2)}
     for p in periods:
         if len(df_close) > p:
-            out[f"近{p}日涨幅%"] = round((latest / df_close.iloc[-1 - p] - 1) * 100, 2)
+            out[f"近{p}日涨幅%"] = round(float((latest / df_close.iloc[-1 - p] - 1) * 100), 2)
     return out
 
 
@@ -35,7 +35,7 @@ def calc_cagr(start_value, end_value, days):
 
 def calc_ma(df_close, windows=(5, 10, 20, 60)):
     """均线值（用于判断多头/空头排列）。"""
-    return {f"MA{w}": round(df_close.tail(w).mean(), 2) for w in windows}
+    return {f"MA{w}": round(float(df_close.tail(w).mean()), 2) for w in windows}
 
 
 def calc_volatility(df_close, window=20):

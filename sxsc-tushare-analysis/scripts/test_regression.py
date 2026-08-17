@@ -179,6 +179,23 @@ def test_valuation_percentiles_dual_check():
     cv = r["截面分位"]
     assert hv is not None and hv == 66.7, "50 高于历史 4/6=66.7%"
     assert cv is not None and cv == 83.3, "50 高于截面 5/6=83.3%"
+    assert r["截面样本数"] == 6
+    assert "样本不足" in r["截面可靠性"], "6 < min_sample(10) 应标注样本不足"
+
+
+def test_fscore_financial_firm_comp_note():
+    """金融机构(comp_type=4) 应触发 comp_note，并返回有效项/缺失项计数；npta 兜底 ROA。"""
+    fina = pd.DataFrame({"end_date": ["20231231", "20241231"], "ann_date": ["20240428", "20250428"],
+                         "roa": [None, None], "npta": [0.74, 0.87], "grossprofit_margin": [None, None],
+                         "debt_to_assets": [76.6, 77.3], "current_ratio": [2.13, 2.13], "assets_turn": [0.04, 0.04]})
+    inc = pd.DataFrame({"end_date": ["20231231", "20241231"], "ann_date": ["20240428", "20250428"], "n_income_attr_p": [6e8, 7e8]})
+    cf = pd.DataFrame({"end_date": ["20231231", "20241231"], "ann_date": ["20240428", "20250428"], "n_cashflow_act": [1e9, 1e9]})
+    bal = pd.DataFrame({"end_date": ["20231231", "20241231"], "ann_date": ["20240428", "20250428"],
+                        "total_share": [3.5e9, 3.5e9], "total_assets": [7.7e10, 8.0e10], "comp_type": [4, 4]})
+    r = calc_piotroski_fscore(fina, inc, cf, bal)
+    assert r["comp_note"] is not None and "金融机构" in r["comp_note"], "券商应触发金融业弱参考提示"
+    assert r["有效项"] + r["缺失项"] == 9
+    assert any("ROA>0: 是" in d for d in r["details"]), "npta 兜底后 ROA>0 应为是"
 
 
 def _run_all():

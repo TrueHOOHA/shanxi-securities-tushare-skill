@@ -12,13 +12,19 @@ import pandas as pd
 
 # ============ 纵向对比：复权处理 ============
 def apply_adj_factor(df_daily, df_adj):
-    """基于 adj_factor 构建后复权价格序列。
-    df_daily: daily 接口结果（含 close, trade_date）
+    """基于 adj_factor 构建后复权价格序列（daily 为未复权，趋势/收益/技术指标必须复权后再算）。
+    df_daily: daily 接口结果（未复权，含 trade_date 及 open/high/low/close/pre_close 等列）
     df_adj: adj_factor 接口结果（含 trade_date, adj_factor）
-    返回 df 增加 close_post 列（后复权收盘价）。
+    返回 df 增加 *_post 列（open_post/high_post/low_post/close_post/pre_close_post，
+    按 daily 实际存在的列逐列 ×adj_factor）。
+    所有后复权列同 scale，可安全用于 OHLC 类指标（KDJ/布林带等）；
+    ⚠️ 切勿用 close_post 配合未复权的 high/low——scale 不一致会导致 KDJ 等指标失真
+    （如需后复权，请统一用 *_post 列，或对 high/low 也取 *_post）。
     """
     merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
-    merged["close_post"] = merged["close"] * merged["adj_factor"]
+    for col in ("open", "high", "low", "close", "pre_close"):
+        if col in merged.columns:
+            merged[f"{col}_post"] = merged[col] * merged["adj_factor"]
     return merged
 
 
@@ -168,14 +174,20 @@ def winsorize_cross_section(series, method="mad", k=3.0):
     return s.clip(lower, upper)
 
 
-def valuation_percentiles(value, historical_series, cross_section_series):
+def valuation_percentiles(value, historical_series, cross_section_series, min_sample=10):
     """估值双口径分位：历史分位 + 同业截面分位（值高于参考集多少比例，0-100）。
     - historical_series：该标的自身近 N 年该指标序列（时序分位，calc_percentile_rank）
     - cross_section_series：当日同行业/同类标的该指标截面（截面分位）
     双口径交叉判断：双双偏高=贵、双双偏低=便宜、背离=相对自身历史与相对同业不一致（需找原因）。
     方向由调用方按指标语义解读（PE 高=偏贵；ROE 高=偏优），函数只返回中性分位数。
+    截面样本 < min_sample 时标注"样本不足"，分位仅供参考（避免 5-6 只同业的 20% 步长噪声）。
     """
+    cs = pd.Series(cross_section_series).dropna()
+    hist = pd.Series(historical_series).dropna() if historical_series is not None else pd.Series([], dtype=float)
+    cs_rank = calc_percentile_rank(value, cs) if len(cs) > 0 else None
     return {
-        "历史分位": calc_percentile_rank(value, historical_series),
-        "截面分位": calc_percentile_rank(value, cross_section_series),
+        "历史分位": calc_percentile_rank(value, hist) if len(hist) > 0 else None,
+        "截面分位": cs_rank,
+        "截面样本数": int(len(cs)),
+        "截面可靠性": "样本不足(仅供参考)" if len(cs) < min_sample else "可用",
     }

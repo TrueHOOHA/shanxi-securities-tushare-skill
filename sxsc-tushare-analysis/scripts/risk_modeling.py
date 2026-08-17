@@ -43,7 +43,7 @@ def calc_tail_risk(returns):
     if std == 0:
         return None
     n = len(ret)
-    skew = round(float(np.mean(((ret - mean) / std) ** 3)) * np.sqrt(n * (n - 1)) / (n - 2), 2) if n > 2 else 0
+    skew = round(float(np.mean(((ret - mean) / std) ** 3) * np.sqrt(n * (n - 1)) / (n - 2)), 2) if n > 2 else 0
     kurt = round(float(np.mean(((ret - mean) / std) ** 4)) - 3, 2)
     return {
         "偏度": skew,
@@ -59,7 +59,7 @@ def calc_drawdown_detail(df_nav):
     """
     cummax = df_nav.cummax()
     dd = (df_nav / cummax - 1) * 100
-    max_dd = round(dd.min(), 2)
+    max_dd = round(float(dd.min()), 2)
 
     underwater = dd < 0
     durations = []
@@ -120,7 +120,7 @@ def calc_rolling_beta(stock_returns, market_returns, window=60):
             betas.append(np.cov(s, m)[0, 1] / v)
     if len(betas) == 0:
         return None
-    latest = round(betas[-1], 2)
+    latest = round(float(betas[-1]), 2)
     if len(betas) < 2:
         return {"当前Beta": latest, "趋势": "数据不足(仅1个窗口)", f"窗口{window}日": True}
     trend = "上升" if betas[-1] > betas[0] else "下降"
@@ -140,9 +140,9 @@ def calc_rolling_sharpe(df_nav, window=60, periods=250, risk_free=0.02):
     if len(sharpes) == 0:
         return None
     if len(sharpes) < 2:
-        return {"当前滚动夏普": round(sharpes[-1], 2), "趋势": "数据不足(仅1个窗口)"}
+        return {"当前滚动夏普": round(float(sharpes[-1]), 2), "趋势": "数据不足(仅1个窗口)"}
     return {
-        "当前滚动夏普": round(sharpes[-1], 2),
+        "当前滚动夏普": round(float(sharpes[-1]), 2),
         "趋势": "上升" if sharpes[-1] > sharpes[0] else "下降",
     }
 
@@ -158,7 +158,7 @@ def calc_relative_strength(ts_code_returns, benchmark_returns):
     cum_stock = (1 + aligned["stock"]).cumprod()
     cum_bench = (1 + aligned["bench"]).cumprod()
     rs = cum_stock / cum_bench
-    latest_rs = round(rs.iloc[-1], 3)
+    latest_rs = round(float(rs.iloc[-1]), 3)
     ref_val = rs.iloc[-20] if len(rs) > 20 else rs.iloc[0]
     trend = "走强" if rs.iloc[-1] > ref_val else "走弱"
     return {"RS": latest_rs, "trend": trend}

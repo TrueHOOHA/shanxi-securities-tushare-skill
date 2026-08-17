@@ -25,9 +25,9 @@ def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
     var = np.var(market)
     if var == 0:
         return None
-    beta = round(cov / var, 2)
+    beta = round(float(cov / var), 2)
     alpha_daily = stock.mean() - (risk_free / periods) - beta * (market.mean() - risk_free / periods)
-    alpha_annual = round(alpha_daily * periods * 100, 2)
+    alpha_annual = round(float(alpha_daily * periods * 100), 2)
     return {
         "Beta": beta,
         "Alpha(年化%)": alpha_annual,
@@ -55,17 +55,22 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     需要 2 期年报数据（当期 + 去年同期）。各表先按 end_date 筛年报(1231)、
     去重后取最近 2 期对比，避免拿 Q3 与 Q2 比导致的非同比错误。
 
-    df_fina: fina_indicator 结果（含 roa, grossprofit_margin, debt_to_assets,
+    df_fina: fina_indicator 结果（含 npta/roa, grossprofit_margin, debt_to_assets,
              current_ratio, assets_turn；均为接口预计算字段）
     df_income: income 结果（含 n_income_attr_p）
     df_cashflow: cashflow 结果（含 n_cashflow_act）
-    df_balances: balancesheet 结果（含 total_share），用于判断是否新增股本；
+    df_balances: balancesheet 结果（含 total_share, total_assets, comp_type 可选），
+                 用于判断是否新增股本；comp_type 用于金融业识别(2银行/3保险/4证券)；
                  可选，缺失则第 7 项计 0 分并标注数据缺失。
+
+    ROA 取值口径：优先 npta(总资产净利润，Piotroski 净利口径)，次选 roa(EBIT 口径，
+    部分金融业为空)，最后用 n_income_attr_p/total_assets 自算——兼容证券/银行等 roa 字段为空的标的。
 
     9 项标准：
       盈利能力   1) ROA>0  2) 经营现金流>0  3) ΔROA>0  4) 经营现金流>净利润(应计质量)
       杠杆/流动/融资 5) Δ资产负债率≤0  6) Δ流动比率>0  7) 未新增股本(Δtotal_share≤0)
       运营效率   8) Δ毛利率>0  9) Δ总资产周转率>0
+    返回 F-Score/rating/details，以及 有效项/缺失项 计数；金融业额外给 comp_note 弱参考提示。
     """
     df_fina = _filter_annual(df_fina)
     df_income = _filter_annual(df_income)
@@ -81,10 +86,22 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
         v = df[col].iloc[pos]
         return v if pd.notna(v) else None
 
+    def _get_roa(pos):
+        # 优先 npta(净利口径)，次选 roa(EBIT 口径，金融业常空)，最后用 净利润/总资产 自算
+        v = _val(df_fina, "npta", pos)
+        if v is None:
+            v = _val(df_fina, "roa", pos)
+        if v is None:
+            ni_ = _val(df_income, "n_income_attr_p", pos)
+            ta_ = _val(df_balances, "total_assets", pos) if df_balances is not None else None
+            if ni_ is not None and ta_ not in (None, 0, 0.0):
+                v = ni_ / ta_ * 100
+        return v
+
     CUR, PREV = -1, -2
 
     # 1. ROA > 0
-    roa = _val(df_fina, "roa", CUR)
+    roa = _get_roa(CUR)
     s = roa is not None and roa > 0
     score += s; details.append(f"ROA>0: {'是' if s else ('否' if roa is not None else '数据缺失')}")
 
@@ -94,7 +111,7 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     score += s; details.append(f"经营现金流>0: {'是' if s else ('否' if cfo is not None else '数据缺失')}")
 
     # 3. ΔROA > 0
-    roa_prev = _val(df_fina, "roa", PREV)
+    roa_prev = _get_roa(PREV)
     if roa is None or roa_prev is None:
         details.append("ΔROA>0: 数据不足")
     else:
@@ -144,7 +161,19 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
         s = at > at_prev; score += s; details.append(f"Δ总资产周转率>0: {'是' if s else '否'}")
 
     rating = "强" if score >= 7 else ("弱" if score <= 2 else "中等")
-    return {"F-Score": score, "rating": rating, "details": details}
+    # 金融业识别（balancesheet comp_type: 1工商业 2银行 3保险 4证券）
+    comp_note = None
+    if df_balances is not None and "comp_type" in df_balances.columns and len(df_balances):
+        ct = df_balances["comp_type"].iloc[-1]
+        if str(ct) in ("2", "3", "4"):
+            comp_note = (f"标的为金融机构(comp_type={ct})，F-Score 为工商业设计，"
+                         f"毛利率/资产周转率等项对金融业语义失真，结果仅弱参考")
+    missing = sum(1 for d in details if "数据缺失" in d or "数据不足" in d)
+    out = {"F-Score": score, "rating": rating, "details": details,
+           "有效项": 9 - missing, "缺失项": missing}
+    if comp_note:
+        out["comp_note"] = comp_note
+    return out
 
 
 # ============ 事件研究 ============
