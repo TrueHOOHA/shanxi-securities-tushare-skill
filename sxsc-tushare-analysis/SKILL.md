@@ -212,6 +212,7 @@ description: >
   - 复权净值 = 单位净值 × 当日复权因子 / 最新复权因子
   - 夏普、最大回撤、Calmar 等指标均基于复权净值序列计算
 - **ETF 复权**：`fund_daily` 返回的是不复权价，`apply_etf_adj`（`fund_adj` 因子）产出 `close_post`。**ETF 的 `fund_adj` 因子口径与股票 `adj_factor` 不同（实测方向/量级不统一，如 510500 ~0.34、512100 ~0.373、510300 ~1.27），`close_post` 绝对值非后复权价，仅供收益/夏普/回撤等 scale-invariant 计算（全程同列 pct_change 与因子绝对值无关）；展示价用未复权 `close`。** 股票 `adj_factor` 则是标准后复权因子（单调递增，`后复权价=原始价×adj_factor`，可展示）。`apply_*_adj` 返回 trade_date/nav_date 索引的 df，可直接喂给 `rebase_series`/`compare_returns`（二者校验日期索引，传整数索引会抛 TypeError）。
+  - **函数选型**：`apply_etf_adj` **只复权 close**（产出 close_post，供收益/夏普/回撤）；KDJ/布林带等需 high/low/close 同 scale 的 OHLC 类指标，**改用 `apply_adj_factor`**（它复权全部 open/high/low/close/pre_close，`*_post` 列同 scale，fund_daily 同样适用）。误用 `apply_etf_adj` 喂 KDJ 会因 high_post/low_post 不存在而 KeyError。
 - **基金规模取数**：`fund_nav.total_netasset` 是季报口径（稀疏，多为 NaN），仅作季度规模快照；需连续日度规模时用 `fund_share.fd_share`（万份）× `fund_nav.unit_nav` 计算：`规模亿元 = fd_share × unit_nav / 1e4`（先按 trade_date 对齐）。`fund_nav` 同 nav_date 可能有重复行，使用前按 nav_date 去重。
 - **期货连续合约**：期货存在换月跳空，纵向分析时用 `fut_mapping` 识别主力合约区间，跨主力合约的连续走势需拼接或用 `fut_daily` 按合约分段分析，不得简单拼接。
 

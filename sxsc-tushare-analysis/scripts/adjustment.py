@@ -57,6 +57,8 @@ def apply_etf_adj(df_daily, df_adj):
     510500 ~0.34、512100 ~0.373、510300 ~1.27），close_post 绝对值非后复权价，
     仅供计算收益/夏普/回撤等 scale-invariant 指标（全程同列，pct_change 与因子绝对值无关）；
     展示价格请用未复权 close。
+    ⚠️ 本函数**只复权 close**（产出 close_post），不复权 OHLC——
+    KDJ/布林带等需 high/low/close 同 scale 的指标，请改用 `apply_adj_factor`（它复权全部 OHLC）。
     """
     merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
     merged = merged.sort_values("trade_date").set_index("trade_date")
