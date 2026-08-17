@@ -20,6 +20,11 @@ from adjustment import (  # noqa: E402
 )
 from attribution import calc_piotroski_fscore, calc_event_study  # noqa: E402
 from basic_metrics import calc_returns, calc_roe_trend, flag_risks  # noqa: E402
+from composite import (  # noqa: E402
+    calc_chip_price_cross, calc_composite_score, calc_earnings_inflection,
+    calc_factor_positioning, calc_price_volume_pattern,
+    calc_risk_budget, calc_technical_confluence,
+)
 from risk_modeling import (  # noqa: E402
     calc_amihud_illiquidity, calc_rolling_beta, calc_var_cvar,
 )
@@ -248,6 +253,55 @@ def test_apply_fund_adj_returns_nav_date_index():
     adj = pd.DataFrame({"trade_date": ["d1", "d2", "d3"], "adj_factor": [1.0, 1.5, 2.0]})
     out = apply_fund_adj(nav.copy(), adj)
     assert list(out.index)[:2] == ["d1", "d2"], f"应为 nav_date 索引，得到 {list(out.index)}"
+
+
+def test_composite_technical_confluence():
+    """技术共振：多指标方向汇总为共振分。"""
+    idx = pd.bdate_range("2026-01-01", periods=60)
+    close = pd.Series(np.linspace(100, 120, 60), index=idx)  # 上涨趋势
+    vol = pd.Series(np.random.randint(10000, 50000, 60).astype(float), index=idx)
+    r = calc_technical_confluence(close, close * 1.02, close * 0.98, vol)
+    assert "score" in r and "signal" in r and len(r["details"]) >= 4
+    assert -6 <= r["score"] <= 6
+
+
+def test_composite_price_volume_pattern():
+    """量价四象限：价×量方向组合。"""
+    idx = pd.bdate_range("2026-01-01", periods=30)
+    close = pd.Series(np.linspace(100, 110, 30), index=idx)
+    vol = pd.Series(np.random.randint(10000, 50000, 30).astype(float), index=idx)
+    r = calc_price_volume_pattern(close, vol)
+    assert "pattern" in r and "meaning" in r
+
+
+def test_composite_score_and_positioning():
+    """多因子综合评分 + 三维定位。"""
+    cs = calc_composite_score(pe_hist_pct=15, fscore=7, return_250d=30, sharpe=1.5, tech_score=3)
+    assert cs["composite"] is not None and 0 <= cs["composite"] <= 1
+    fp = calc_factor_positioning(15, 7, 30)
+    assert "便宜" in fp["dimensions"]["估值"] and "优" in fp["dimensions"]["质量"]
+
+
+def test_composite_earnings_inflection():
+    """业绩拐点：ROE 方向 + 增速方向 → 拐点判断。"""
+    fina = pd.DataFrame({"end_date": ["Q1", "Q2", "Q3", "Q4"], "roe": [30, 32, 35, 38], "grossprofit_margin": [76] * 4, "netprofit_margin": [37] * 4})
+    inc = pd.DataFrame({"end_date": ["Q1", "Q2", "Q3", "Q4"], "total_revenue": [100, 110, 125, 140], "n_income_attr_p": [30, 33, 36, 39]})
+    r = calc_earnings_inflection(fina, inc)
+    assert r["roe_direction"] == "上升"
+
+
+def test_composite_risk_budget():
+    """风险预算：回撤/波动/Beta/流动性 → 建议仓位。"""
+    r = calc_risk_budget(max_drawdown=-45, beta=1.3, amihud=0.15, volatility=42)
+    assert r["suggested_position_pct"] <= 20 and r["risk_level"] == "高"
+
+
+def test_composite_chip_price_cross():
+    """筹码-股价交叉验证。"""
+    hn = pd.DataFrame({"end_date": ["20260331", "20260630"], "holder_num": [100000, 95000]})
+    dp = pd.DataFrame({"trade_date": [f"2026{m:02d}01" for m in range(1, 9)], "close": list(np.linspace(100, 108, 8))})
+    r = calc_chip_price_cross(hn, dp)
+    assert "cross" in r and "health" in r
 
 
 def _run_all():

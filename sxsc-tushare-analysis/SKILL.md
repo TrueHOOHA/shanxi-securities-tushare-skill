@@ -301,6 +301,7 @@ description: >
   - `technical_indicators.py` — MACD/RSI/KDJ/布林带/OBV/量比
   - `risk_modeling.py` — VaR/CVaR/尾部风险/回撤深度/Amihud/滚动Beta/滚动夏普/RS
   - `attribution.py` — CAPM Beta-Alpha/Piotroski F-Score/事件研究法
+  - `composite.py` — 跨维度组合分析：技术共振/量价模式/多因子综合评分/三维定位/业绩拐点/配对相对价值/风险预算/筹码-股价交叉
 - **字段单位注意**：各接口字段单位不同，取数后必须确认字段含义与单位再计算。常见单位差异：
   - `moneyflow` 的 `*_amount` 字段单位为**万元**，换算亿元需 `/1e4`
   - `daily` 的 `amount` 字段单位为**千元**（即元×1000），换算亿元需 `/1e5`
