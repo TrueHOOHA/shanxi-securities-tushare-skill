@@ -90,8 +90,6 @@
 | `slb_sec` | `references/转融券交易汇总.md` |
 | `slb_sec_detail` | `references/转融券交易明细.md` |
 | `sz_daily_info` | `references/深圳市场每日交易情况.md` |
-| `stk_account` | `references/股票开户数据.md` |
-| `stk_account_old` | `references/股票开户数据（旧）.md` |
 | `stk_alert` | `references/交易所重点提示证券.md` |
 | `stk_high_shock` | `references/个股严重异常波动.md` |
 | `stk_holdernumber` | `references/股东人数.md` |
