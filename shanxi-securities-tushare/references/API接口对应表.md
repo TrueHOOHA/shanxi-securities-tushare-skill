@@ -7,10 +7,13 @@
 | `adj_factor` | `references/复权因子.md` |
 | `balancesheet` | `references/资产负债表.md` |
 | `block_trade` | `references/大宗交易.md` |
+| `broker_recommend` | `references/券商月度金股.md` |
 | `cashflow` | `references/现金流量表.md` |
 | `cb_basic` | `references/可转债基本信息.md` |
+| `cb_call` | `references/可转债赎回信息.md` |
 | `cb_daily` | `references/可转债行情.md` |
 | `cb_issue` | `references/可转债发行.md` |
+| `cb_rate` | `references/可转债条款.md` |
 | `cn_cpi` | `references/居民消费价格指数.md` |
 | `cn_gdp` | `references/GDP数据.md` |
 | `cn_m` | `references/货币供应量.md` |
@@ -59,6 +62,7 @@
 | `index_dailybasic` | `references/大盘指数每日指标.md` |
 | `index_global` | `references/国际指数.md` |
 | `index_member` | `references/申万行业成分构成.md` |
+| `index_member_all` | `references/申万行业成分股.md` |
 | `index_monthly` | `references/指数月线行情.md` |
 | `index_weekly` | `references/指数周线行情.md` |
 | `index_weight` | `references/指数成分和权重.md` |
@@ -85,6 +89,9 @@
 | `slb_len_mm` | `references/做市借券交易汇总.md` |
 | `slb_sec` | `references/转融券交易汇总.md` |
 | `slb_sec_detail` | `references/转融券交易明细.md` |
+| `sz_daily_info` | `references/深圳市场每日交易情况.md` |
+| `stk_account` | `references/股票开户数据.md` |
+| `stk_account_old` | `references/股票开户数据（旧）.md` |
 | `stk_alert` | `references/交易所重点提示证券.md` |
 | `stk_high_shock` | `references/个股严重异常波动.md` |
 | `stk_holdernumber` | `references/股东人数.md` |
