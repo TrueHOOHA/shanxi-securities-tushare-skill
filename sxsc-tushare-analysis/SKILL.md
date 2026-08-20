@@ -19,6 +19,21 @@ description: >
 2. 调用接口前必须查 `shanxi-securities-tushare/references/API接口对应表.md`，**禁止凭记忆写接口**。
 3. 取数参考 `shanxi-securities-tushare/scripts/` 下 demo 模板，按环境校验结果选择 SDK 或 HTTP 方式。
 
+## 快速入口（默认调用）
+
+本 skill 已封装统一 Runner，Agent 识别标的类型后**直接调用对应入口**，无需再从原始接口逐条取数：
+
+| 标的类型 | 模块 | 默认入口 | 示例 |
+|---------|------|---------|------|
+| 股票 | `analysis_runner.py` | `stock_report(ts_code, end_date=None, dimensions=None)` | `stock_report("600519.SH")` |
+| 基金（场外 .OF / 场内 ETF .SH/.SZ） | `fund_analysis_runner.py` | `fund_report(ts_code, end_date=None, dimensions=None)` | `fund_report("110011.OF")` |
+| 指数 | `index_analysis_runner.py` | `index_report(ts_code, end_date=None, dimensions=None)` | `index_report("000300.SH")` |
+| 期货（主力连续合约） | `fut_analysis_runner.py` | `fut_report(ts_code, end_date=None, dimensions=None)` | `fut_report("SR.ZCE")` |
+
+- `dimensions` 为可选维度白名单，默认使用 Runner 内置维度；用户明确"只看估值/技术面"时再传入裁剪。
+- 旧入口 `stock_analyzer.py` 仍保留为兼容包装，新代码优先使用 `analysis_runner.stock_report`。
+- 各 Runner 内部已实现维度级并行取数，无需 Agent 手动并发。
+
 ## 核心工作流
 
 每次分析按此顺序：
@@ -26,7 +41,7 @@ description: >
 1. **环境校验** — 运行 `python shanxi-securities-tushare/scripts/check_env.py`，确认 token 可用，确定 mode（sdk/http）。
 2. **标的识别** — 解析用户表述，确定标的类型 + ts_code。根据代码格式或名称搜索确定。
 3. **维度加载** — 默认加载该标的类型的摘要维度；用户明确指定（如"只看技术面""只看估值"）时仅加载指定维度，避免权限/配额不足与超长输出。"全套固定"为默认上限，可裁剪。
-4. **逐维取数分析** — 对每个维度，先查接口表取数，再计算关键指标，形成判断；每个维度需标注四态之一（见"维度状态与部分失败策略"）。
+4. **调用 Runner 分析** — 直接调用对应 Runner 的 `*_report()` / `*_analyze()` 入口；Runner 内部按默认维度并行取数、计算并生成结构化结果。如需自定义维度，通过 `dimensions` 参数裁剪。
 5. **综合报告** — 按结构化模板输出 markdown 报告。
 
 ## 标的识别规则
@@ -47,9 +62,9 @@ description: >
 
 ## 分析维度（默认全套，按需裁剪）
 
-### 一、股票（11 个维度）
+### 一、股票（默认 11 维）
 
-每个维度均输出：**结论句 → 关键数据表 → 维度解读**
+每个维度均输出：**描述句 → 数据表 → 分析评价**
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
@@ -70,37 +85,37 @@ description: >
   - 对比近 4 个季度股东户数变化率，判断趋势方向
   - 结合股价走势交叉验证（均为相关性观察，非因果结论）：户数持续下降 + 股价上涨 = 可能筹码锁定（健康上涨特征之一）；户数持续下降 + 股价下跌 = 可能主力被套（阶段见底信号之一）；户数持续上升 + 股价上涨 = 可能散户接盘（警惕见顶）
   - 使用 `stk_holdernumber` 接口获取历史数据，按 `end_date` 排序后计算环比变化率
-| 7 | 两融/杠杆情绪 | `margin_detail`、`margin_secs` | 融资余额及变化率、融资买入额占比、融券余额；两融是否处于高位 |
-| 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst`、`stk_alert`、`stk_shock` | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖、异常波动提示 |
-| 9 | 解禁压力 | **`share_float`** | 未来 3 个月即将解禁股份数量及占比、解禁股东类型 |
-| 10 | 风险提示 | 汇总以上维度 | 综合风险分级：高/中/低，列出具体风险信号 |
-| 11 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr` | 大盘近期走势（牛/熊/震荡）、CPI/PPI 走势与方向、LPR 利率水平；标的所处宏观环境是顺风还是逆风 |
+| 7 | 两融/杠杆情绪 | `margin_detail` | 融资余额及变化率、融券余额、近5日融资余额变化 |
+| 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst` | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖 |
+| 9 | 解禁压力 | **`share_float`** | 未来 3 个月即将解禁股份数量及占比 |
+| 10 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr`、`cn_gdp` | 大盘近期走势、CPI/PPI 走势与方向、LPR 利率水平、GDP 同比 |
+| 11 | 风险提示 | 汇总以上维度 | 综合风险分级：高/中/低，列出具体风险信号 |
 
-### 二、指数（7 个维度）
+### 二、指数（默认 8 维）
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
-| 1 | 概况 | `index_basic` | 发布方、基期、基点、加权方式、类别、成分股数量 |
-| 2 | 行情趋势 | `index_daily`、`index_weekly`、`index_monthly` | 近 20/60/250 日涨跌幅、MA 排列、年化波动率 |
-| 3 | 估值 | `index_dailybasic` | PE(TTM)、PB 历史分位数（近 5 年）。**注意：`index_dailybasic` 不覆盖科创板指数**（如科创50 000688.SH），此类指数估值需用成分股 `daily_basic` 聚合估算，或标注数据缺失 |
-| 4 | 成分权重 | `index_weight`、`index_member` | 前十大权重股及权重占比 |
-| 5 | 行业分布 | 成分股 + `index_classify` | 申万一级行业权重分布（前三行业占比） |
-| 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 全市场融资余额趋势、融资买入额/成交额占比 |
+| 1 | 概况 | `index_basic` | 发布方、基期、基点、类别、上市日期 |
+| 2 | 行情趋势 | `index_daily` | 近 20/60/250 日涨跌幅、MA 排列、年化波动率、最大回撤、夏普比率；**基准对比**：对沪深300计算相同口径指标并列对比 |
+| 3 | 估值 | `index_dailybasic` | PE(TTM)、PB 历史分位数。**注意：`index_dailybasic` 不覆盖科创板指数**（如科创50 000688.SH），此类指数估值降级为用成分股 `daily_basic` 聚合估算（截面中位数 + 历史分位），并标注数据源 |
+| 4 | 成分权重 | `index_weight` | 前十大权重股及权重占比，补充股票名称（`stock_basic` 批量查询） |
+| 5 | 行业分布 | `index_weight` 获取成分股 + `stock_basic` 查行业 | 成分股按申万行业归类，统计各行业数量及占比（前三行业占比） |
+| 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 两市融资余额合计、近60日变化方向、杠杆情绪判断 |
 | 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比。**`index_global` 的 `ts_code` 无点前缀**（如 `DJI`/`SPX`/`IXIC`/`N225`/`HSI`，非 `.DJI`），代码格式需查 `references/国际指数.md` 文档。**注意：`index_global` 返回数据为降序（最新在前），计算前必须 `.sort_values('trade_date')`，否则 `iloc` 索引取到的日期方向相反，导致涨跌幅方向错误** |
-
-### 三、公募基金（8 个维度）
+| 8 | 风险提示 | 汇总以上维度 | 波动偏高/回撤较深/估值偏高等风险信号 |
+### 三、公募基金（默认 9 维）
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
-| 1 | 概况 | `fund_basic`、`fund_company` | 基金类型、成立日期、管理人、基金公司、规模 |
-| 2 | 净值走势 | `fund_nav`、**`fund_adj`**、**`fund_daily`**（场内ETF） | 近 1/3/6 月、近 1/3 年收益率（基于复权净值）、累计净值走势；**场内 ETF 必须用 `fund_daily` + `apply_etf_adj` 复权**（`daily` 接口对 ETF 返回空，且不复权价在份额拆分时严重失真） |
-| 3 | 业绩指标 | 基于 `fund_nav` 计算 | 年化收益率、夏普比率、最大回撤、Calmar 比率、年化波动率 |
-| 4 | 基金经理 | `fund_manager` | 任职起始日、任职年限、历任基金表现 |
-| 5 | 持仓分析 | `fund_portfolio` | 前十大重仓股及占比、行业集中度、持股变动 |
-| 6 | 规模变化 | `fund_share` | 近 4 季规模变化趋势、申购/赎回情况 |
-| 7 | 分红 | `fund_div` | 累计分红次数、分红金额、分红频率 |
-| 8 | 同类对比 | `fund_basic`(筛同类型)、`fund_nav`(逐只) | 同类排名（近 1/3 年）、同类平均收益率、同类最大回撤。取数方式：`fund_basic` 按 fund_type 筛同类 → 逐只取 `fund_nav` → 计算 → 排名 |
-
+| 1 | 概况 | `fund_basic` | 基金类型、成立日期、上市日期、基金简称 |
+| 2 | 净值走势 | `fund_nav`、**`fund_adj`**、**`fund_daily`**（场内ETF） | 近 1/3/6 月、近 1/3 年收益率（基于复权净值）；**场内 ETF 必须用 `fund_daily` + `apply_etf_adj` 复权**（`daily` 接口对 ETF 返回空，且不复权价在份额拆分时严重失真） |
+| 3 | 业绩指标 | 基于 `fund_nav`/`fund_daily` 计算 | 年化波动率、夏普比率、最大回撤 |
+| 4 | 同类对比 | `fund_basic`(筛同类型)、`fund_daily`/`fund_nav`(逐只) | 同类排名（近 20/60/120/250 日分位）；ETF 优先选同后缀场内基金对比，按成立日期排序优先选上市早的 |
+| 5 | 基金经理 | `fund_manager` | 任职起始日、任职年限 |
+| 6 | 持仓分析 | `fund_portfolio` | 前十大重仓股及占比（`stk_mkv_ratio`）、补充股票名称；字段为 `symbol`/`mkv`/`stk_mkv_ratio`（非 name/ratio/market_val） |
+| 7 | 规模变化 | `fund_share` | 按季度采样（`groupby` 季度末），近4季份额变化趋势 |
+| 8 | 分红 | `fund_div` | 累计分红次数、分红金额；字段为 `ex_date`/`div_cash`（非 div_date） |
+| 9 | 风险提示 | 汇总以上维度 | 回撤较深/波动偏高/份额缩水等风险信号 |
 ### 四、期货（6 个维度）
 
 | # | 维度 | 数据接口 | 关键分析指标 |
@@ -114,7 +129,7 @@ description: >
 
 ## 报告结构
 
-每份分析报告输出为结构化 markdown，每个维度按 **结论 → 数据表 → 分析评价** 的格式，最后附整体分析评价。
+每份分析报告输出为结构化 markdown，每个维度按 **描述句 → 数据表 → 分析评价** 的格式，最后附整体分析评价。
 
 ```markdown
 # 标的名称 综合分析报告
@@ -122,44 +137,39 @@ description: >
 > 数据日期：YYYY-MM-DD（Tushare 数据为 T-1 日）
 
 ## 1. 概况
-- 一句话结论
+描述句（如：银行ETF，华宝基金发行，跟踪中证银行指数，规模居同类前列）
 - 关键指标汇总表
 
 ## 2. 行情趋势
-- 结论
-- 关键数据表（含基准对比）
-- 技术指标（MACD/RSI/布林带）
-- 收益归因（Beta/Alpha）
+描述句（近20日涨跌幅、波动率、回撤等核心指标概述）
+- 涨跌幅对比表（标的 vs 沪深300并列）
+- 风控指标对比表（波动率/回撤/夏普 vs 基准）
+- 技术指标表（MACD/RSI/KDJ/布林带合并一张表）
+- 进阶量化指标（Beta/Alpha/Sortino/滚动Beta/RS/VaR等）
 - **分析评价**：对本维度数据的解读，包含明确的投资参考含义
-  （如"近20日反弹+10%且MACD金叉，短期动能偏强；但年化波动30%偏高，注意仓位控制"）
 
 ## 3. 估值分析
-- 数据表
-- **分析评价**：（如"PE 20.35处于近1年73分位，估值中位偏高；PB 7.23，需结合行业平均判断"）
+描述句（PE/PB/历史分位等概述）
+- 估值指标表
+- 行业截面估值对比表（如适用）
+- **分析评价**：（如"PE历史分位23.7%偏低，PB低于行业中位数，估值需结合业绩增速判断"）
 
-## 4. 财务质量
-- 数据表
-- Piotroski F-Score（如有）
-- **分析评价**：（如"毛利率90%+盈利质量顶级，但F-Score 2分偏弱，关注利润增速趋势"）
-
-## 5. 资金面
-- 数据表
-- **分析评价**
-
-## 6. 两融/杠杆情绪
-- 数据表
-- **分析评价**
-
-## 7. 风险提示
+## N. 风险提示
 - 风险信号 1
 - 风险信号 2
+- 数据缺失说明（如有维度失败）
 
-## 8. 整体分析评价
-- 综合各维度信号，给出跨维度的交叉判断
-- 回答"该标的当前处于什么状态"（告别单维度罗列）
-- 适用于多标的对比时，回答"两者分别代表什么风格，各自适合什么场景"
-- 最后一句明确结论，如"茅台适合稳健型底仓配置，寒武纪适合风险偏好型品种"
+## N+1. 整体分析评价
+**综合判断**：一句话定位标的特征标签（如"低估值、防御型、高股息"）
+- 分维度要点列表（趋势/估值/财务/资金/筹码/杠杆/宏观各一行）
+**风格定位**：标的属于什么风格型资产
+**结论**：综合各维度给出投资参考含义和适用场景
 
+---
+*本报告由AI基于山西证券Tushare平台数据自动生成，基于 T-1 日历史数据，仅供技术交流与学习参考，不构成任何投资建议或财务指导。*
+```
+
+每维度分析评价必须包含对投资者的明确参考含义（如"估值处于历史低位，但需结合行业景气度判断"），而非罗列数据。
 ---
 *本报告由AI基于山西证券Tushare平台数据自动生成，基于 T-1 日历史数据，仅供技术交流与学习参考，不构成任何投资建议或财务指导。*
 ```
@@ -292,9 +302,9 @@ description: >
 
 - 每次调用前必须查 `shanxi-securities-tushare/references/API接口对应表.md` 确认接口名和文档路径。
 - 环境校验走 `python shanxi-securities-tushare/scripts/check_env.py`。
-- 取数参考 `sxsc-tushare-analysis/scripts/common.py` 的环境初始化与取数函数。
-  - 优先使用 `get_daily_for_period(ts_code, end_date, periods)` 按最大周期自动推算起始日期，避免手动计算 start_date 导致数据不足。
-  - 如需手动指定日期，用 `calc_start_date(end_date, n_trading_days)` 计算。
+- 取数统一走 `sxsc-tushare-analysis/scripts/data_api.py` 的 `DataAPI` 类（SDK/HTTP 双模式自动选择，内置 T-0 占位行过滤、安全调用）。
+  - 各 Runner 通过 `DataAPI` 实例调用接口，如 `api.get_daily(ts_code, start, end)`。
+  - 日期推算用 `data_api.shift_date(end_date, -n_days)` 回溯交易日。
 - 分析计算参考 `sxsc-tushare-analysis/scripts/` 下按方法分模块的参考模板：
   - `basic_metrics.py` — 收益率/MA/波动率/回撤/夏普/Sortino/IR/财务趋势/风险信号
   - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/Z-Score/`clean_panel`(清洗)/`winsorize_cross_section`(截面去极值)/`valuation_percentiles`(双口径分位)
