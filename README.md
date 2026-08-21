@@ -179,7 +179,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 每份报告输出为结构化 markdown，按此模板：
 
 ```
-# 标的名称 综合分析报告
+# 标的名称 全景研究报告
 
 > 数据日期：YYYY-MM-DD（Tushare 数据为 T-1 日）
 > 免责：本报告基于历史数据，不构成投资建议
