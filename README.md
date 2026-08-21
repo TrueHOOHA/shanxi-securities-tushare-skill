@@ -241,6 +241,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
 | `risk_modeling.py` | `calc_var_cvar`/`calc_tail_risk`/`calc_drawdown_detail`/`calc_amihud_illiquidity`/`calc_rolling_beta`/`calc_rolling_sharpe`/`calc_relative_strength` |
 | `attribution.py` | `calc_beta_alpha`/`calc_piotroski_fscore`/`calc_event_study` |
+| `composite.py` | `calc_technical_confluence`/`calc_price_volume_pattern`/`calc_composite_score`/`calc_factor_positioning`/`calc_earnings_inflection`/`calc_pair_relative_value`/`calc_risk_budget`/`calc_chip_price_cross` |
 
 ---
 
@@ -269,11 +270,18 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
     ├── SKILL.md                               # 综合分析执行规范入口
     └── scripts/
         ├── data_api.py                        # 统一数据访问层（DataAPI：SDK/HTTP 双模式取数）
+        ├── result_model.py                    # 分析结果数据模型
+        ├── analysis_runner.py                 # 股票综合分析 Runner（stock_report）
+        ├── index_analysis_runner.py           # 指数综合分析 Runner（index_report）
+        ├── fund_analysis_runner.py            # 基金综合分析 Runner（fund_report）
+        ├── fut_analysis_runner.py             # 期货综合分析 Runner（fut_report）
+        ├── stock_analyzer.py                  # 旧入口兼容包装
         ├── basic_metrics.py                   # 基础指标（收益率/MA/波动率/夏普等）
         ├── adjustment.py                      # 复权与归一化（adj_factor/rebase/Z-Score）
         ├── technical_indicators.py            # 技术指标（MACD/RSI/KDJ/布林带/OBV）
         ├── risk_modeling.py                   # 风险建模（VaR/尾部风险/滚动分析/RS）
-        └── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
+        ├── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
+        └── composite.py                       # 跨维度组合分析（技术共振/量价/多因子评分等）
 ```
 
 ## 注意事项
