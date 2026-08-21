@@ -100,6 +100,8 @@ class DataAPI:
         self.env = env
         self.token = os.getenv("SXSC_TUSHARE_TOKEN")
         self.http_url = os.getenv("SXSC_TUSHARE_HTTP_URL") or self.DEFAULT_HTTP_URL
+        # tushare 数据为 T-1：最新可用日期 = 昨天（自然日-1），接口层据此裁剪避免取到 T-0 占位行
+        self._t_minus_1 = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
         if mode is None:
             self.mode = self._detect_mode()
@@ -122,6 +124,18 @@ class DataAPI:
             return "sdk"
         except ImportError:
             return "http"
+
+    def _cap_dates(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """裁剪 end_date/trade_date 不超过 T-1（tushare 只有 T-1 数据，避免取到 T-0 占位行）。
+
+        仅裁 8 位 YYYYMMDD 日期，不影响 start_m/end_m（6 位月份）或 start_q/end_q（季度）。
+        """
+        capped = dict(params)
+        for k in ("end_date", "trade_date"):
+            v = capped.get(k)
+            if isinstance(v, str) and len(v) == 8 and v > self._t_minus_1:
+                capped[k] = self._t_minus_1
+        return capped
 
     def _api(self):
         if self.mode == "sdk":
@@ -149,6 +163,9 @@ class DataAPI:
     def _call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
         """统一调用：SDK 优先，否则 HTTP。"""
         _acquire_rate_slot()
+        # share_float 查未来解禁计划，end_date 是未来窗口上界，不裁剪
+        if api_name != "share_float":
+            params = self._cap_dates(params)
         if self.mode == "sdk" and self._pro is not None:
             api = getattr(self._pro, api_name, None)
             if api is not None:
@@ -388,6 +405,7 @@ class DataAPI:
     def _fut_sdk_call(self, api_name: str, params: Dict[str, Any]) -> Optional[pd.DataFrame]:
         """期货接口SDK调用：不传fields，规避定制SDK字段名校验，返回全字段本地选列。"""
         _acquire_rate_slot()
+        params = self._cap_dates(params)
         if self.mode == "sdk" and self._pro is not None:
             api = getattr(self._pro, api_name, None)
             if api is not None:
