@@ -70,6 +70,7 @@ class FundAnalysisRunner:
 
         self.fund_name: Optional[str] = None
         self.fund_type: Optional[str] = None
+        self.found_date: Optional[str] = None
         self.results: Dict[str, DimensionResult] = {}
 
     # ---------- 维度：概况 ----------
@@ -83,6 +84,7 @@ class FundAnalysisRunner:
         row = df.iloc[0]
         self.fund_name = row.get("name")
         self.fund_type = row.get("fund_type")
+        self.found_date = row.get("found_date")
 
         data = {
             "ts_code": self.ts_code,
@@ -280,6 +282,9 @@ class FundAnalysisRunner:
             return DimensionResult.empty("分红", note="该基金无分红记录（fund_div接口未覆盖或基金确实未进行现金分红，部分ETF通过净值增长体现收益）")
 
         df = df.sort_values("ann_date").reset_index(drop=True)
+        # fund_div 可能返回重复行（同一除息日多行），按 ex_date 去重避免虚增次数与累计金额
+        if "ex_date" in df.columns:
+            df = df.drop_duplicates("ex_date", keep="last").reset_index(drop=True)
         total_div = _safe_float(df["div_cash"].sum())
         data = {
             "count": len(df),
@@ -288,6 +293,11 @@ class FundAnalysisRunner:
         }
         latest_div = df.iloc[-1]
         conclusion = f"历史分红 {len(df)} 次，累计 {total_div:.4f} 元/份，最近一次除息日 {latest_div.get('ex_date', 'N/A')}"
+        # 标注成立前分红（转型基金：fund_basic 的 found_date 可能为转型日，fund_div 保留原基金历史分红）
+        if self.found_date and "ex_date" in df.columns:
+            pre_count = int((df["ex_date"].astype(str) < self.found_date).sum())
+            if pre_count > 0:
+                conclusion += f"（其中 {pre_count} 次在成立日 {self.found_date} 前，可能为转型前原基金记录）"
         return DimensionResult.success("分红", conclusion=conclusion, data=data)
 
 
