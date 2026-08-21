@@ -235,7 +235,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 模块 | 覆盖函数 |
 |------|---------|
-| `common.py` | `http_call`/`get_daily_sdk`/`get_daily_http`/`get_daily_for_period`/`get_fund_daily_sdk`/`get_fund_daily_for_period`/`calc_start_date`/`format_report_snippet`（环境初始化、自动足量取数，含场内基金） |
+| `data_api.py` | `DataAPI`/`shift_date`/`ensure_sorted`/`drop_t0_placeholder`/`safe_call`（统一数据访问层：SDK/HTTP 双模式取数，内置 T-0 占位行过滤，覆盖股票/指数/基金/期货/财务/资金流等接口） |
 | `basic_metrics.py` | `calc_returns`/`calc_cagr`/`calc_ma`/`calc_volatility`/`calc_max_drawdown`/`calc_sharpe`/`calc_sortino`/`calc_information_ratio`/`calc_roe_trend`/`calc_revenue_growth`/`flag_risks` |
 | `adjustment.py` | `apply_adj_factor`/`apply_fund_adj`/`apply_etf_adj`/`rebase_series`/`compare_returns`/`calc_percentile_rank`/`calc_zscore` |
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
@@ -268,7 +268,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 └── sxsc-tushare-analysis/                     # 分析 skill（负责综合分析）
     ├── SKILL.md                               # 综合分析执行规范入口
     └── scripts/
-        ├── common.py                          # 环境初始化与取数函数
+        ├── data_api.py                        # 统一数据访问层（DataAPI：SDK/HTTP 双模式取数）
         ├── basic_metrics.py                   # 基础指标（收益率/MA/波动率/夏普等）
         ├── adjustment.py                      # 复权与归一化（adj_factor/rebase/Z-Score）
         ├── technical_indicators.py            # 技术指标（MACD/RSI/KDJ/布林带/OBV）
