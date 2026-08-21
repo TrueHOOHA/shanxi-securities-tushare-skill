@@ -503,7 +503,7 @@ class IndexAnalysisRunner:
 
         name = self.index_name or self.ts_code
         lines = [
-            f"# {name} 指数综合分析报告",
+            f"# {name} 全景研究报告",
             "",
             f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）",
             "",

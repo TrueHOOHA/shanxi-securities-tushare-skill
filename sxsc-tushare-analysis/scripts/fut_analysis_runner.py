@@ -346,7 +346,7 @@ class FutAnalysisRunner:
         if not self.results:
             self.run()
         name = self.fut_name or self.symbol
-        lines = [f"# {name} 期货综合分析报告", "", f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）", ""]
+        lines = [f"# {name} 全景研究报告", "", f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）", ""]
         dim_order = [d for d in self.dimensions if d in self.results]
         risk_dim = "risk" if "risk" in dim_order else None
         ordered = [d for d in dim_order if d != "risk"]
