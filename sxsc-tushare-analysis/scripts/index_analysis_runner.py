@@ -138,7 +138,8 @@ class IndexAnalysisRunner:
     @safe_result("估值分析")
     def analyze_valuation(self) -> DimensionResult:
         # index_dailybasic 对部分指数（如科创50）不可用
-        start = shift_date(self.end_date, -max(self.PERIODS) * 2)
+        # 取近 5 年估值序列（~1250 自然日），不足时按实际返回量降级标注
+        start = shift_date(self.end_date, -250 * 5)
         df = self.api._call("index_dailybasic", {"ts_code": self.ts_code, "start_date": start, "end_date": self.end_date},
                             "ts_code,trade_date,pe,pb,total_mv")
         if df is None or df.empty:
@@ -149,19 +150,28 @@ class IndexAnalysisRunner:
         latest = df.iloc[-1]
         pe = _safe_float(latest.get("pe"))
         pb = _safe_float(latest.get("pb"))
+        hist_count = len(df)
 
+        # 历史分位需 ≥250 日数据才统计可靠；不足则置 None 并标注
         pe_hist = None
         pb_hist = None
-        if len(df) >= 10:
+        if hist_count >= 250:
             if pe is not None:
                 pe_hist = round((df["pe"] < pe).sum() / len(df) * 100, 1)
             if pb is not None:
                 pb_hist = round((df["pb"] < pb).sum() / len(df) * 100, 1)
+        hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
 
-        data = {"pe": pe, "pb": pb, "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist}
+        data = {"pe": pe, "pb": pb, "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist, "hist_sample_days": hist_count}
         conclusion = f"PE {pe if pe is not None else 'N/A'}，PB {pb if pb is not None else 'N/A'}"
         if pe_hist is not None:
-            conclusion += f"，PE历史分位 {pe_hist}%"
+            conclusion += f"，PE近5年历史分位 {pe_hist}%"
+        elif pe is not None and hist_count < 250:
+            conclusion += f"，PE近5年历史分位 N/A{hist_note}"
+        if pb_hist is not None:
+            conclusion += f"，PB近5年历史分位 {pb_hist}%"
+        elif pb is not None and hist_count < 250:
+            conclusion += f"，PB近5年历史分位 N/A{hist_note}"
         return DimensionResult.success("估值分析", conclusion=conclusion, data=data)
 
     # ---------- 维度：成分权重 ----------

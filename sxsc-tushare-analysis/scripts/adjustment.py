@@ -23,6 +23,10 @@ def apply_adj_factor(df_daily, df_adj):
     """
     merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
     merged = merged.sort_values("trade_date").set_index("trade_date")
+    # adj_factor 接口可能缺失最新交易日（数据滞后），左连接后该日为 NaN，
+    # 会导致 close_post 最新日 NaN、区间收益率与技术指标全失效。
+    # adj_factor 单调递增，前向填充用前一日因子是安全近似。
+    merged["adj_factor"] = merged["adj_factor"].ffill()
     for col in ("open", "high", "low", "close", "pre_close"):
         if col in merged.columns:
             merged[f"{col}_post"] = merged[col] * merged["adj_factor"]
@@ -62,6 +66,8 @@ def apply_etf_adj(df_daily, df_adj):
     """
     merged = df_daily.merge(df_adj[["trade_date", "adj_factor"]], on="trade_date", how="left")
     merged = merged.sort_values("trade_date").set_index("trade_date")
+    # adj_factor 可能缺失最新交易日（数据滞后），前向填充避免 close_post 最新日 NaN
+    merged["adj_factor"] = merged["adj_factor"].ffill()
     merged["close_post"] = merged["close"] * merged["adj_factor"]
     return merged
 
