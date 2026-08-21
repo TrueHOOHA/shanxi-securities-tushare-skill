@@ -170,7 +170,7 @@ class FutAnalysisRunner:
             holding_df = self.api.get_fut_holding(self.main_contract, shift_date(self.end_date, -20), self.end_date)
         if (holding_df is None or holding_df.empty):
             note = (f"fut_holding 持仓排名接口仅覆盖大商所(DCE)，{EXCHANGE_MAP.get(suf,(None,'该交易所'))[1]}无持仓排名数据"
-                    if not covered else "无法获取持仓排名数据")
+                    if not covered else "持仓排名数据暂缺（主力合约较新或接口未更新），已降级为持仓量(oi)序列")
             # 退而求其次：从日线取持仓量(oi)序列
             daily = self.api.get_fut_daily(self.ts_code, shift_date(self.end_date, -60), self.end_date)
             oi_series = None
@@ -199,7 +199,8 @@ class FutAnalysisRunner:
     # ---------- 维度：仓单库存 ----------
     @safe_result("仓单库存")
     def analyze_wsr(self) -> DimensionResult:
-        end_d = datetime.strptime(self.end_date, "%Y%m%d")
+        # 从 T-1 起算，避免循环首日 d=今天被裁剪后标签与数据日期不一致
+        end_d = datetime.strptime(min(self.end_date, self.api._t_minus_1), "%Y%m%d")
         rows = []
         for i in range(0, 90, 7):
             d = (end_d - timedelta(days=i)).strftime("%Y%m%d")
