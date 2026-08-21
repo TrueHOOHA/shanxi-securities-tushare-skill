@@ -14,6 +14,9 @@
 """
 
 import os
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -25,6 +28,31 @@ import pandas as pd
 def shift_date(date_str: str, days: int) -> str:
     d = datetime.strptime(date_str, "%Y%m%d")
     return (d + timedelta(days=days)).strftime("%Y%m%d")
+
+
+# ---------- 进程级速率限制器 ----------
+# 多维度并行取数时，所有 SDK/HTTP 调用共享同一个限流器，
+# 确保每秒请求不超过 MAX_RPS 次，避免触发服务端限流/封禁。
+_MAX_RPS = 30
+_rate_lock = threading.Lock()
+_rate_timestamps: deque = deque()
+
+
+def _acquire_rate_slot() -> None:
+    """阻塞直至获得一个请求配额（滑动窗口限流，每秒 ≤ _MAX_RPS 次）。"""
+    while True:
+        with _rate_lock:
+            now = time.monotonic()
+            # 清理 1 秒窗口外的时间戳
+            while _rate_timestamps and _rate_timestamps[0] <= now - 1.0:
+                _rate_timestamps.popleft()
+            if len(_rate_timestamps) < _MAX_RPS:
+                _rate_timestamps.append(now)
+                return
+            # 窗口已满，算出到最早时间戳过期还需多久
+            wait = 1.0 - (now - _rate_timestamps[0])
+        if wait > 0:
+            time.sleep(wait)
 
 
 def ensure_sorted(df: pd.DataFrame, date_col: str = "trade_date") -> pd.DataFrame:
@@ -120,6 +148,7 @@ class DataAPI:
 
     def _call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
         """统一调用：SDK 优先，否则 HTTP。"""
+        _acquire_rate_slot()
         if self.mode == "sdk" and self._pro is not None:
             api = getattr(self._pro, api_name, None)
             if api is not None:
@@ -358,6 +387,7 @@ class DataAPI:
 
     def _fut_sdk_call(self, api_name: str, params: Dict[str, Any]) -> Optional[pd.DataFrame]:
         """期货接口SDK调用：不传fields，规避定制SDK字段名校验，返回全字段本地选列。"""
+        _acquire_rate_slot()
         if self.mode == "sdk" and self._pro is not None:
             api = getattr(self._pro, api_name, None)
             if api is not None:

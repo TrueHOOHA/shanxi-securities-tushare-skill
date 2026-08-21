@@ -187,6 +187,18 @@ class StockAnalysisRunner:
         bench_code = "000300.SH"
         bench_returns = None
         beta_alpha = None
+        info_ratio = None
+        rolling_beta = None
+        relative_strength = None
+
+        # 仅依赖标的自身序列的进阶指标：不受基准取数成败影响
+        stock_ret = price_series.pct_change().dropna()
+        sortino = calc_sortino(price_series)
+        cagr = calc_cagr(price_series.iloc[0], price_series.iloc[-1], len(price_series) - 1)
+        rolling_sharpe = calc_rolling_sharpe(price_series)
+        tail_risk = calc_tail_risk(stock_ret) if len(stock_ret) >= 10 else None
+        var_cvar = calc_var_cvar(stock_ret) if len(stock_ret) >= 30 else None
+
         df_bench = self.api.get_index_daily(bench_code, start, self.end_date)
         if df_bench is not None and not df_bench.empty:
             bench_series = df_bench.set_index("trade_date")["close"].sort_index()
@@ -194,17 +206,13 @@ class StockAnalysisRunner:
             bench_volatility = calc_volatility(bench_series)
             bench_max_dd = calc_max_drawdown(bench_series)
             bench_sharpe = calc_sharpe(bench_series)
-            stock_ret = price_series.pct_change().dropna()
             market_ret = bench_series.pct_change().dropna()
             aligned = pd.DataFrame({"stock": stock_ret, "market": market_ret}).dropna()
             if len(aligned) >= 30:
                 beta_alpha = calc_beta_alpha(aligned["stock"], aligned["market"])
-                sortino = calc_sortino(price_series)
                 info_ratio = calc_information_ratio(aligned["stock"], aligned["market"])
                 rolling_beta = calc_rolling_beta(aligned["stock"], aligned["market"])
-                rolling_sharpe = calc_rolling_sharpe(price_series)
                 relative_strength = calc_relative_strength(aligned["stock"], aligned["market"])
-                cagr = calc_cagr(price_series.iloc[0], price_series.iloc[-1], len(price_series) - 1)
 
         ret_20 = returns.get("近20日涨幅%", "N/A")
         bench_20 = bench_returns.get("近20日涨幅%", "N/A") if bench_returns else "N/A"
@@ -239,15 +247,15 @@ class StockAnalysisRunner:
             "stage_low_250d": stage_low,
             "benchmark": {"ts_code": bench_code, "returns": bench_returns, "volatility": bench_volatility, "max_drawdown": bench_max_dd, "sharpe": bench_sharpe} if bench_returns else None,
             "beta_alpha": beta_alpha,
-            "sortino": sortino if 'sortino' in locals() else None,
-            "information_ratio": info_ratio if 'info_ratio' in locals() else None,
-            "cagr": cagr if 'cagr' in locals() else None,
-            "rolling_beta": rolling_beta if 'rolling_beta' in locals() else None,
-            "rolling_sharpe": rolling_sharpe if 'rolling_sharpe' in locals() else None,
-            "relative_strength": relative_strength if 'relative_strength' in locals() else None,
-            "tail_risk": calc_tail_risk(stock_ret) if 'stock_ret' in locals() and len(stock_ret) >= 10 else None,
+            "sortino": sortino,
+            "information_ratio": info_ratio,
+            "cagr": cagr,
+            "rolling_beta": rolling_beta,
+            "rolling_sharpe": rolling_sharpe,
+            "relative_strength": relative_strength,
+            "tail_risk": tail_risk,
             "amihud": self._calc_amihud(price_series, df_daily) if df_daily is not None else None,
-            "var_cvar": calc_var_cvar(stock_ret) if 'stock_ret' in locals() and len(stock_ret) >= 30 else None,
+            "var_cvar": var_cvar,
         }
 
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
@@ -256,13 +264,15 @@ class StockAnalysisRunner:
 
     @safe_result("估值分析")
     def analyze_valuation(self) -> DimensionResult:
-        start = shift_date(self.end_date, -self.PERIODS[-1] * 2)
+        # 取近 5 年估值序列（~1250 自然日），不足时按实际返回量降级标注
+        start = shift_date(self.end_date, -250 * 5)
         df = self.api.get_daily_basic(self.ts_code, start, self.end_date)
         if df is None or df.empty:
             return DimensionResult.empty("估值分析", note="无法获取估值数据")
 
         df = df.sort_values("trade_date").reset_index(drop=True)
         latest = df.iloc[-1]
+        hist_count = len(df)
 
         pe = round(_safe_float(latest.get("pe_ttm")) or _safe_float(latest.get("pe")), 2)
         pb = round(_safe_float(latest.get("pb")), 2)
@@ -270,10 +280,15 @@ class StockAnalysisRunner:
         dv = round(_safe_float(latest.get("dv_ratio")), 2)
         total_mv = _safe_float(latest.get("total_mv"))
 
+        # 历史分位需 ≥250 日数据才统计可靠；次新股等不足则置 None 并标注
         pe_hist = None
-        if pe is not None and "pe_ttm" in df.columns:
-            pe_hist = calc_percentile_rank(pe, df["pe_ttm"].dropna())
-        pb_hist = calc_percentile_rank(pb, df["pb"].dropna()) if pb is not None else None
+        pb_hist = None
+        if hist_count >= 250:
+            if pe is not None and "pe_ttm" in df.columns:
+                pe_hist = calc_percentile_rank(pe, df["pe_ttm"].dropna())
+            if pb is not None:
+                pb_hist = calc_percentile_rank(pb, df["pb"].dropna())
+        hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
 
         # 行业截面估值对比
         industry_val = self._calc_industry_valuation(pe, pb)
@@ -286,14 +301,19 @@ class StockAnalysisRunner:
             "total_mv_billion": total_mv / 1e4 if total_mv else None,
             "pe_hist_percentile": pe_hist,
             "pb_hist_percentile": pb_hist,
+            "hist_sample_days": hist_count,
             "industry": industry_val,
         }
 
         conclusion = f"PE(TTM) {pe if pe is not None else 'N/A'}，PB {pb if pb is not None else 'N/A'}，总市值 {_fmt_billions(total_mv)}。"
         if pe_hist is not None:
-            conclusion += f"PE 近2年历史分位 {pe_hist}%。"
+            conclusion += f"PE 近5年历史分位 {pe_hist}%。"
+        elif pe is not None and hist_count < 250:
+            conclusion += f"PE 近5年历史分位 N/A{hist_note}。"
         if pb_hist is not None:
-            conclusion += f"PB 近2年历史分位 {pb_hist}%。"
+            conclusion += f"PB 近5年历史分位 {pb_hist}%。"
+        elif pb is not None and hist_count < 250:
+            conclusion += f"PB 近5年历史分位 N/A{hist_note}。"
         if industry_val:
             conclusion += (
                 f" 同行业({industry_val.get('industry_name', self.industry)})PE均值 {industry_val.get('pe_mean', 'N/A')}"
