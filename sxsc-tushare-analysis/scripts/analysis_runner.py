@@ -274,10 +274,14 @@ class StockAnalysisRunner:
         latest = df.iloc[-1]
         hist_count = len(df)
 
-        pe = round(_safe_float(latest.get("pe_ttm")) or _safe_float(latest.get("pe")), 2)
-        pb = round(_safe_float(latest.get("pb")), 2)
-        ps = round(_safe_float(latest.get("ps_ttm")) or _safe_float(latest.get("ps")), 2)
-        dv = round(_safe_float(latest.get("dv_ratio")), 2)
+        pe_raw = _safe_float(latest.get("pe_ttm")) or _safe_float(latest.get("pe"))
+        pe = round(pe_raw, 2) if pe_raw is not None else None
+        pb_raw = _safe_float(latest.get("pb"))
+        pb = round(pb_raw, 2) if pb_raw is not None else None
+        ps_raw = _safe_float(latest.get("ps_ttm")) or _safe_float(latest.get("ps"))
+        ps = round(ps_raw, 2) if ps_raw is not None else None
+        dv_raw = _safe_float(latest.get("dv_ratio"))
+        dv = round(dv_raw, 2) if dv_raw is not None else None
         total_mv = _safe_float(latest.get("total_mv"))
 
         # 历史分位需 ≥250 日数据才统计可靠；次新股等不足则置 None 并标注
@@ -1555,7 +1559,7 @@ class StockAnalysisRunner:
         pe_hist = data.get("pe_hist_percentile")
         pb_hist = data.get("pb_hist_percentile")
         pe = data.get("pe_ttm")
-        ind_pe = data.get("industry", {}).get("pe_median")
+        ind_pe = (data.get("industry") or {}).get("pe_median")
         parts = []
         try:
             pe_f = float(pe_hist)
@@ -1689,7 +1693,17 @@ if __name__ == "__main__":
         default=None,
         help='维度列表，逗号分隔，默认 overview,trend,valuation,financial,moneyflow,margin,market_activity,macro,risk',
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+    )
     args = parser.parse_args()
 
     dims = args.dimensions.split(",") if args.dimensions else None
-    print(stock_report(args.ts_code, args.end_date, dims))
+    report = stock_report(args.ts_code, args.end_date, dims)
+    output = args.output or f"{args.ts_code}_report.md"
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"报告已保存: {os.path.abspath(output)}")
+    print(report)

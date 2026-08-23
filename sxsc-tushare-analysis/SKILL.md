@@ -44,6 +44,8 @@ description: >
 4. **调用 Runner 分析** — 直接调用对应 Runner 的 `*_report()` / `*_analyze()` 入口；Runner 内部按默认维度并行取数、计算并生成结构化结果。如需自定义维度，通过 `dimensions` 参数裁剪。
 5. **综合报告** — 按结构化模板输出 markdown 报告。
 
+> **报告必须落盘（强制）**：每份分析报告**必须**以 markdown 文件保存到当前项目目录，文件名 `<ts_code>_report.md`（如 `600159.SH_report.md`）。CLI 已默认自动保存到当前工作目录并打印保存路径；若通过 Python 接口调用 `*_report()` 返回字符串，则必须由 Agent 将该字符串写入项目目录下的 `<ts_code>_report.md` 文件。禁止只打印到终端不落盘。
+
 ## 标的识别规则
 
 | 用户表述 | 标的类型 | 说明 |

@@ -248,6 +248,30 @@ class FundAnalysisRunner:
         latest = df.iloc[-1]
         latest_share = _safe_float(latest.get("fd_share"))
 
+        # 份额拆分归一化：拆分日 fd_share 与 fund_adj 因子同步跳变。
+        # 检测后把历史份额统一到最新拆分口径，避免"最新 vs 季度变化"不可比。
+        split_note = ""
+        adj = self.api.get_fund_adj(self.ts_code, df["trade_date"].iloc[0], df["trade_date"].iloc[-1])
+        if adj is not None and not adj.empty:
+            adj = adj.sort_values("trade_date").drop_duplicates("trade_date").set_index("trade_date")["adj_factor"]
+            adj = adj.reindex(df["trade_date"]).ffill().fillna(adj.iloc[0])
+            df["adj_factor"] = adj.values
+            split_dates = []
+            for i in range(1, len(df)):
+                af_chg = df["adj_factor"].iloc[i] / df["adj_factor"].iloc[i - 1]
+                sh_chg = df["fd_share"].iloc[i] / df["fd_share"].iloc[i - 1]
+                if af_chg > 1.3 and sh_chg > 1.3:
+                    split_dates.append(df["trade_date"].iloc[i])
+            if split_dates:
+                latest_adj = df["adj_factor"].iloc[-1]
+                df["fd_share"] = df["fd_share"] * latest_adj / df["adj_factor"]
+                ratios = []
+                for d in split_dates:
+                    idx = df[df["trade_date"] == d].index[0]
+                    ratio = df["adj_factor"].iloc[idx] / df["adj_factor"].iloc[idx - 1]
+                    ratios.append(f"{d}({ratio:.1f}x)")
+                split_note = f"（期间发生份额拆分{'、'.join(ratios)}，历史份额已统一为最新拆分口径）"
+
         # 按季度采样：仅取季度末月(3/6/9/12)，每季末月取最后交易日，取最近4季
         df["ym"] = df["trade_date"].str[:6]
         df["mm"] = df["trade_date"].str[4:6]
@@ -263,6 +287,7 @@ class FundAnalysisRunner:
         data = {
             "latest_share": latest_share,
             "quarterly_changes": share_changes,
+            "split_note": split_note,
         }
         conclusion = f"最新份额 {latest_share:,.2f} 万份"
         if len(share_changes) >= 2:
@@ -270,7 +295,7 @@ class FundAnalysisRunner:
             last = share_changes[-1]["fd_share"]
             if first and last:
                 chg = round((last / first - 1) * 100, 2)
-                conclusion += f"，近4季变化 {chg:+.2f}%"
+                conclusion += f"，近4季变化 {chg:+.2f}%{split_note}"
         return DimensionResult.success("规模变化", conclusion=conclusion, data=data)
 
     # ---------- 维度：分红 ----------
@@ -698,11 +723,12 @@ class FundAnalysisRunner:
         if share and share.is_ok() and share.data:
             latest_share = self._f(self._v(share.data, "latest_share"))
             changes = share.data.get("quarterly_changes", [])
+            split_note = share.data.get("split_note", "")
             if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
                 chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
-                points.append(f"- **规模**：最新份额 {self._fmt(latest_share)} 万份，近4季变化 {chg:+.2f}%")
+                points.append(f"- **规模**：最新份额 {self._fmt(latest_share)} 万份，近4季变化 {chg:+.2f}%{split_note}")
             else:
-                points.append(f"- **规模**：最新份额 {self._fmt(latest_share)} 万份")
+                points.append(f"- **规模**：最新份额 {self._fmt(latest_share)} 万份{split_note}")
         if peer and peer.is_ok() and peer.data:
             own = peer.data.get("own", {})
             rank = own.get("近20日%排名%", "N/A")
@@ -842,13 +868,14 @@ class FundAnalysisRunner:
 
         elif res.title == "规模变化":
             changes = data.get("quarterly_changes", [])
+            split_note = data.get("split_note", "")
             if changes:
                 s_rows = [{"季度": c.get("quarter", "N/A"), "份额(万份)": self._fmt(c.get("fd_share"))} for c in changes]
                 lines.append(self._md(pd.DataFrame(s_rows)))
             lines.append("")
             if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
                 chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
-                lines.append(f"**分析评价**：近4季份额变化 {chg:+.2f}%，" + ("存在赎回压力" if chg < -10 else "规模相对稳定" if abs(chg) < 10 else "资金持续流入") + "。")
+                lines.append(f"**分析评价**：近4季份额变化 {chg:+.2f}%{split_note}，" + ("存在赎回压力" if chg < -10 else "规模相对稳定" if abs(chg) < 10 else "资金持续流入") + "。")
 
         elif res.title == "分红":
             rows = [
@@ -894,5 +921,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="基金综合分析 Runner")
     parser.add_argument("ts_code", help="基金代码，如 110011.OF 或 510300.SH")
     parser.add_argument("--end-date", default=None, help="分析截止日期 YYYYMMDD")
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+    )
     args = parser.parse_args()
-    print(fund_report(args.ts_code, args.end_date))
+    report = fund_report(args.ts_code, args.end_date)
+    output = args.output or f"{args.ts_code}_report.md"
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"报告已保存: {os.path.abspath(output)}")
+    print(report)

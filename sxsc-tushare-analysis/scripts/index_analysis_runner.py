@@ -944,5 +944,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="指数综合分析 Runner")
     parser.add_argument("ts_code", help="指数代码，如 000300.SH")
     parser.add_argument("--end-date", default=None, help="分析截止日期 YYYYMMDD")
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+    )
     args = parser.parse_args()
-    print(index_report(args.ts_code, args.end_date))
+    report = index_report(args.ts_code, args.end_date)
+    output = args.output or f"{args.ts_code}_report.md"
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"报告已保存: {os.path.abspath(output)}")
+    print(report)
