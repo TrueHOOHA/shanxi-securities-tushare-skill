@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from basic_metrics import calc_ma, calc_max_drawdown, calc_returns, calc_sharpe, calc_volatility
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
+from report_html import df_to_md_table, render_html_report
 
 
 def _today() -> str:
@@ -130,6 +131,12 @@ class IndexAnalysisRunner:
             "max_drawdown": max_dd,
             "sharpe": sharpe,
             "benchmark": bench_data,
+            "chart": {
+                "title": "指数日线收盘",
+                "type": "line",
+                "dates": [str(d) for d in series.index.tolist()],
+                "series": [{"name": self.index_name or self.ts_code, "data": series.tolist()}],
+            },
         }
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
 
@@ -163,6 +170,15 @@ class IndexAnalysisRunner:
         hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
 
         data = {"pe": pe, "pb": pb, "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist, "hist_sample_days": hist_count}
+        data["chart"] = {
+            "title": "近5年 PE/PB 走势",
+            "type": "line",
+            "dates": df["trade_date"].tolist(),
+            "series": [
+                {"name": "PE", "yAxisIndex": 0, "data": df["pe"].tolist()},
+                {"name": "PB", "yAxisIndex": 1, "data": df["pb"].tolist()},
+            ],
+        }
         conclusion = f"PE {pe if pe is not None else 'N/A'}，PB {pb if pb is not None else 'N/A'}"
         if pe_hist is not None:
             conclusion += f"，PE近5年历史分位 {pe_hist}%"
@@ -347,7 +363,29 @@ class IndexAnalysisRunner:
         parts = [f"两市融资余额合计 {total_rzye:.0f}亿"]
         if avg_chg is not None:
             direction = "上升" if avg_chg > 0 else "下降"
-            parts.append(f"近60日融资余额{direction} {abs(avg_chg)}%")
+            parts.append(f"近一年融资余额{direction} {abs(avg_chg)}%")
+        # 两市融资余额走势（亿元）；两所数据天数可能差一天，按日期对齐避免错位
+        _m_dates = []
+        _m_raw = {}  # label -> {trade_date: rzye}
+        for _label, _df in (("上交所", sse_df), ("深交所", szse_df)):
+            if _df is None or _df.empty:
+                continue
+            _d = _df.sort_values("trade_date")
+            _m_raw[_label] = dict(zip(_d["trade_date"], _d["rzye"]))
+            if len(_d["trade_date"]) > len(_m_dates):
+                _m_dates = _d["trade_date"].tolist()
+        _m_series = []
+        for _label, _m in _m_raw.items():
+            _vals = [_m.get(d) for d in _m_dates]
+            _m_series.append({"name": _label,
+                             "data": [round(v / 1e8, 2) if v is not None and v == v else None for v in _vals]})
+        if _m_series:
+            data["chart"] = {
+                "title": "两市融资余额走势（亿元）",
+                "type": "line",
+                "dates": _m_dates,
+                "series": _m_series,
+            }
         conclusion = "，".join(parts)
         return DimensionResult.success("两融/市场杠杆", conclusion=conclusion, data=data)
 
@@ -472,7 +510,7 @@ class IndexAnalysisRunner:
                     lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                     else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x))
                 )
-        return df.to_markdown(index=False, disable_numparse=True)
+        return df_to_md_table(df)
 
     DIM_TITLES = {
         "overview": "概况",
@@ -512,10 +550,12 @@ class IndexAnalysisRunner:
             self.run()
 
         name = self.index_name or self.ts_code
+        _dts = self.results.get("trend")
+        _ds = _dts.data.get("chart", {}).get("dates") if (_dts and _dts.is_ok() and _dts.data) else None
         lines = [
             f"# {name} 全景研究报告",
             "",
-            f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）",
+            f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
         ]
 
@@ -667,7 +707,9 @@ class IndexAnalysisRunner:
 
         if style_parts:
             lines.append("")
-            lines.append(f"**风格定位**：{name}属于{'/'.join(style_parts)}型指数。")
+            _st = "/".join(style_parts)
+            _st = _st[:-1] if _st.endswith("型") else _st
+            lines.append(f"**风格定位**：{name}属于{_st}型指数。")
 
         # 结论
         concl_parts = []
@@ -709,8 +751,11 @@ class IndexAnalysisRunner:
             }
             rows = []
             for k, v in data.items():
-                if v is not None and str(v) != "nan":
-                    rows.append({"项目": label_map.get(k, k), "内容": str(v)})
+                if v is None or str(v) == "nan":
+                    continue
+                if k in ("base_date", "list_date") and str(v).isdigit() and len(str(v)) == 8:
+                    v = f"{str(v)[:4]}-{str(v)[4:6]}-{str(v)[6:]}"
+                rows.append({"项目": label_map.get(k, k), "内容": str(v)})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 
@@ -816,7 +861,7 @@ class IndexAnalysisRunner:
                         if idx_entry[1] == best[1]:
                             eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标的中表现最强。"
                         elif idx_entry[1] == worst[1]:
-                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标中表现最弱。"
+                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标的中表现最弱。"
                         else:
                             eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，介于{best[0]}({best[1]}%)与{worst[0]}({worst[1]}%)之间。"
                         lines.append(f"**分析评价**：{eval_text}")
@@ -916,11 +961,11 @@ class IndexAnalysisRunner:
             parts.append(f"两市融资余额合计 {total_rzye:.0f}亿，")
         if avg_chg is not None:
             if avg_chg > 5:
-                parts.append(f"近60日上升 {avg_chg}%，杠杆资金快速入场，市场风险偏好升温，需警惕追高风险。")
+                parts.append(f"近一年上升 {avg_chg}%，杠杆资金快速入场，市场风险偏好升温，需警惕追高风险。")
             elif avg_chg < -5:
-                parts.append(f"近60日下降 {abs(avg_chg)}%，杠杆资金持续撤离，市场风险偏好降温，反映资金面偏谨慎。")
+                parts.append(f"近一年下降 {abs(avg_chg)}%，杠杆资金持续撤离，市场风险偏好降温，反映资金面偏谨慎。")
             else:
-                parts.append(f"近60日变化 {avg_chg}%，杠杆情绪相对平稳，市场风险偏好未出现明显转向。")
+                parts.append(f"近一年变化 {avg_chg}%，杠杆情绪相对平稳，市场风险偏好未出现明显转向。")
         parts.append("两融余额是市场整体杠杆水平的晴雨表，融资余额上升通常对应风险偏好提升，下降则反映去杠杆压力。")
         return "**分析评价**：" + "".join(parts)
 
@@ -933,7 +978,8 @@ def analyze_index(ts_code: str, end_date: Optional[str] = None, dimensions: Opti
 
 def index_report(ts_code: str, end_date: Optional[str] = None, dimensions: Optional[List[str]] = None) -> str:
     runner = IndexAnalysisRunner(ts_code=ts_code, end_date=end_date, dimensions=dimensions)
-    return runner.report()
+    md = runner.report()
+    return render_html_report(md, runner.results)
 
 
 if __name__ == "__main__":
@@ -947,12 +993,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         default=None,
-        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+        help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
     report = index_report(args.ts_code, args.end_date)
-    output = args.output or f"{args.ts_code}_report.md"
+    output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"报告已保存: {os.path.abspath(output)}")
-    print(report)
+    print(f"HTML 报告已保存: {os.path.abspath(output)}")

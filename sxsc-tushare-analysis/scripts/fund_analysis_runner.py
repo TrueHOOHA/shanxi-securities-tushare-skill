@@ -31,6 +31,7 @@ from adjustment import apply_fund_adj, apply_etf_adj
 from basic_metrics import calc_max_drawdown, calc_returns, calc_sharpe, calc_volatility
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
+from report_html import df_to_md_table, render_html_report
 
 
 def _today() -> str:
@@ -91,7 +92,7 @@ class FundAnalysisRunner:
             "name": self.fund_name,
             "fund_type": self.fund_type,
             "found_date": row.get("found_date"),
-            "issue_date": row.get("issue_date"),
+            "list_date": row.get("list_date"),
             "delist_date": row.get("delist_date"),
         }
         return DimensionResult.success("概况", data=data)
@@ -133,6 +134,12 @@ class FundAnalysisRunner:
         return DimensionResult.success("净值走势", conclusion=conclusion, data={
             "latest_nav": latest_nav,
             "returns": returns,
+            "chart": {
+                "title": "净值走势（复权）",
+                "type": "line",
+                "dates": [str(d) for d in nav_series.index.tolist()],
+                "series": [{"name": "复权净值", "data": [round(float(v), 4) for v in nav_series.tolist()]}],
+            },
         })
 
     # ---------- 维度：业绩指标 ----------
@@ -296,6 +303,13 @@ class FundAnalysisRunner:
             if first and last:
                 chg = round((last / first - 1) * 100, 2)
                 conclusion += f"，近4季变化 {chg:+.2f}%{split_note}"
+        # 份额走势图（亿份，按最新拆分口径）
+        data["chart"] = {
+            "title": "基金份额走势（亿份）",
+            "type": "line",
+            "dates": df["trade_date"].tolist(),
+            "series": [{"name": "份额", "data": [round(v / 1e4, 2) if v == v else None for v in df["fd_share"].tolist()]}],
+        }
         return DimensionResult.success("规模变化", conclusion=conclusion, data=data)
 
     # ---------- 维度：分红 ----------
@@ -329,15 +343,20 @@ class FundAnalysisRunner:
     # ---------- 维度：同类对比（默认） ----------
 
     def _extract_peer_keywords(self, name: Optional[str]) -> list:
-        """从基金名称提取行业/主题关键词（剔除管理人名与通用词），缩窄同类对比口径，避免混入其他行业ETF。"""
+        """从基金名称提取行业/主题关键词（先剔除管理人名，再取剩余中文片段与指数代码），缩窄同类对比口径。"""
         import re
         if not name:
             return []
         manager_stop = {"国泰","华宝","易方达","华夏","南方","嘉实","富国","广发","招商","博时","汇添富","景顺","东财","浦银","华泰柏瑞","银华","华安","大成","鹏华","工银","交银","建信","兴全","中欧","万家","国联安","长信","银河","中银","上投","摩根","泰康","平安","前海","开源","国寿","人保","西藏","诺安","信达","华商","中邮","安信","长城","中海","中加"}
         generic_stop = {"基金","指数","策略","增强","红利","低波","联接","股票型","债券型","混合型","货币","商品","REITs","LOF","ETF","型"}
-        cn = re.findall(r"[\u4e00-\u9fa5]+", str(name))
-        return [s for s in cn if s not in manager_stop and s not in generic_stop and len(s) >= 2]
-
+        rest = str(name)
+        for m in manager_stop:  # 剔除管理人名子串，避免"华泰柏瑞沪深"整体当关键词
+            rest = rest.replace(m, "")
+        cn = re.findall(r"[\u4e00-\u9fa5]+", rest)
+        nums = re.findall(r"\d+", rest)
+        kws = [s for s in cn if s not in generic_stop and len(s) >= 2]
+        kws += [n for n in nums if len(n) >= 3]  # 指数代码（如 300/500/50）
+        return kws
     @safe_result("同类对比")
     def analyze_peer(self) -> DimensionResult:
         if not self.fund_type:
@@ -353,7 +372,18 @@ class FundAnalysisRunner:
                 peers_df = peers_df[peers_df["ts_code"].str.endswith(suffix)].copy()
             keywords = self._extract_peer_keywords(self.fund_name)
             if keywords and peers_df is not None and not peers_df.empty and "name" in peers_df.columns:
-                narrow = peers_df[peers_df["name"].apply(lambda n: any(k in str(n) for k in keywords))]
+                # 中文词与数字词分开判断：必须同时命中（如"沪深"+"300"），避免"沪深港黄金"这类含"沪深"但不含"300"的误入
+                _zh = [k for k in keywords if not k[0].isdigit()]
+                _num = [k for k in keywords if k[0].isdigit()]
+
+                def _match(n):
+                    if _zh and not any(z in n for z in _zh):
+                        return False
+                    if _num and not any(k in n for k in _num):
+                        return False
+                    return True
+
+                narrow = peers_df[peers_df["name"].apply(lambda n: _match(str(n)))]
                 if len(narrow) >= 3:
                     peers_df = narrow
                     peer_scope = f"同主题({'/'.join(keywords)})"
@@ -400,12 +430,16 @@ class FundAnalysisRunner:
                     if series is None or len(series) < 2:
                         return None
                     returns = calc_returns(series, periods=self.PERIODS)
+                    # 归一化净值序列（基准日=100，供同类对比图）
+                    _base = float(series.iloc[0])
+                    _norm = [round(float(v) / _base * 100, 2) if v == v else None for v in series.tolist()]
                     return {
                         "ts_code": code,
                         "近20日%": returns.get("近20日涨幅%", "N/A"),
                         "近60日%": returns.get("近60日涨幅%", "N/A"),
                         "近120日%": returns.get("近120日涨幅%", "N/A"),
                         "近250日%": returns.get("近250日涨幅%", "N/A"),
+                        "_series": {"dates": [str(d) for d in series.index.tolist()], "norm": _norm},
                     }
                 except Exception:
                     pass
@@ -448,6 +482,40 @@ class FundAnalysisRunner:
                 own_row[f"{col}排名%"] = round((valid < own_val_f).sum() / len(valid) * 100, 1)
 
         data = {"own": own_row, "peers": peer_df.head(10).to_dict("records"), "peer_total": len(peer_df), "scope": peer_scope}
+
+        # 同类对比图：本基金 vs 同类中位数（归一化净值，基准日=100，按本基金日期对齐）
+        _own_dates, _own_norm = [], []
+        nav_res = self.results.get("nav")
+        if nav_res and nav_res.is_ok() and nav_res.data:
+            _c = nav_res.data.get("chart")
+            if _c and _c.get("series") and _c.get("dates"):
+                _vals = _c["series"][0].get("data") or []
+                _bd = _vals[0] if _vals else None
+                if _bd:
+                    _own_dates = _c["dates"]
+                    _own_norm = [round(v / _bd * 100, 2) if v is not None and v == v else None for v in _vals]
+        _med = []
+        if _own_dates and rows:
+            _pn = []
+            for _r in rows:
+                _s = _r.get("_series") or {}
+                if _s.get("dates") and _s.get("norm"):
+                    _m = dict(zip(_s["dates"], _s["norm"]))
+                    _pn.append([_m.get(d) for d in _own_dates])
+            if _pn:
+                for i in range(len(_own_dates)):
+                    _vs = [p[i] for p in _pn if p[i] is not None]
+                    _med.append(round(sorted(_vs)[len(_vs) // 2], 2) if _vs else None)
+        if _own_dates and _own_norm and any(v is not None for v in _med):
+            data["chart"] = {
+                "title": "净值归一化对比（基准日=100）",
+                "type": "line",
+                "dates": _own_dates,
+                "series": [
+                    {"name": self.fund_name or self.ts_code, "data": _own_norm},
+                    {"name": "同类中位数", "data": _med},
+                ],
+            }
         rank20 = own_row.get("近20日%排名%", "N/A")
         conclusion = f"同类基金({peer_scope})共 {len(peer_df)} 只，本基金近20日收益排名约 {rank20}% 分位"
         return DimensionResult.success("同类对比", conclusion=conclusion, data=data)
@@ -585,7 +653,7 @@ class FundAnalysisRunner:
                     lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                     else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x))
                 )
-        return df.to_markdown(index=False, disable_numparse=True)
+        return df_to_md_table(df)
 
     DIM_TITLES = {
         "overview": "概况", "nav": "净值走势", "performance": "业绩指标",
@@ -613,10 +681,12 @@ class FundAnalysisRunner:
             self.run()
 
         name = self.fund_name or self.ts_code
+        _dts = self.results.get("nav")
+        _ds = _dts.data.get("chart", {}).get("dates") if (_dts and _dts.is_ok() and _dts.data) else None
         lines = [
             f"# {name} 全景研究报告",
             "",
-            f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）",
+            f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
         ]
 
@@ -792,12 +862,15 @@ class FundAnalysisRunner:
         if res.title == "概况":
             label_map = {
                 "ts_code": "基金代码", "name": "基金简称", "fund_type": "基金类型",
-                "found_date": "成立日期", "issue_date": "上市日期", "delist_date": "退市日期",
+                "found_date": "成立日期", "list_date": "上市日期", "delist_date": "退市日期",
             }
             rows = []
             for k, v in data.items():
-                if v is not None and str(v) != "nan":
-                    rows.append({"项目": label_map.get(k, k), "内容": str(v)})
+                if v is None or str(v) == "nan":
+                    continue
+                if k in ("found_date", "list_date", "delist_date") and str(v).isdigit() and len(str(v)) == 8:
+                    v = f"{str(v)[:4]}-{str(v)[4:6]}-{str(v)[6:]}"
+                rows.append({"项目": label_map.get(k, k), "内容": str(v)})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 
@@ -837,7 +910,8 @@ class FundAnalysisRunner:
             if peers:
                 lines.append("")
                 lines.append("**同类基金前10**：")
-                lines.append(self._md(pd.DataFrame(peers)))
+                _clean = [{k: v for k, v in p.items() if not k.startswith("_")} for p in peers]
+                lines.append(self._md(pd.DataFrame(_clean)))
             rank = own.get("近20日%排名%", "N/A")
             lines.append("")
             lines.append(f"**分析评价**：本基金近20日收益排名约 {self._fmt(rank)}% 分位，" + ("处于同类前1/3" if self._f(rank) and self._f(rank) < 33 else "处于同类中游" if self._f(rank) and self._f(rank) < 67 else "处于同类后1/3") + "。")
@@ -910,7 +984,8 @@ def analyze_fund(ts_code: str, end_date: Optional[str] = None, dimensions: Optio
 
 def fund_report(ts_code: str, end_date: Optional[str] = None, dimensions: Optional[List[str]] = None) -> str:
     runner = FundAnalysisRunner(ts_code=ts_code, end_date=end_date, dimensions=dimensions)
-    return runner.report()
+    md = runner.report()
+    return render_html_report(md, runner.results)
 
 
 if __name__ == "__main__":
@@ -924,12 +999,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         default=None,
-        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+        help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
     report = fund_report(args.ts_code, args.end_date)
-    output = args.output or f"{args.ts_code}_report.md"
+    output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"报告已保存: {os.path.abspath(output)}")
-    print(report)
+    print(f"HTML 报告已保存: {os.path.abspath(output)}")

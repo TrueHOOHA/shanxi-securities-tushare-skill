@@ -176,7 +176,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ### 报告结构
 
-每份报告输出为结构化 markdown，按此模板：
+每份报告输出为独立 HTML 文件（浏览器直接打开，时间序列图表内联在各维度章节内），内容按此模板：
 
 ```
 # 标的名称 全景研究报告

@@ -34,6 +34,7 @@ from basic_metrics import (
 )
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
+from report_html import df_to_md_table, render_html_report
 from risk_modeling import (
     calc_amihud_illiquidity,
     calc_relative_strength,
@@ -256,6 +257,13 @@ class StockAnalysisRunner:
             "tail_risk": tail_risk,
             "amihud": self._calc_amihud(price_series, df_daily) if df_daily is not None else None,
             "var_cvar": var_cvar,
+            "chart": {
+                "title": "日线行情（未复权）",
+                "type": "candlestick",
+                "dates": df_daily.sort_values("trade_date")["trade_date"].tolist(),
+                "ohlc": df_daily.sort_values("trade_date")[["open", "close", "low", "high"]].values.tolist(),
+                "vol": df_daily.sort_values("trade_date")["vol"].tolist(),
+            },
         }
 
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
@@ -307,6 +315,15 @@ class StockAnalysisRunner:
             "pb_hist_percentile": pb_hist,
             "hist_sample_days": hist_count,
             "industry": industry_val,
+            "chart": {
+                "title": "近5年 PE(TTM)/PB 走势",
+                "type": "line",
+                "dates": df["trade_date"].tolist(),
+                "series": [
+                    {"name": "PE(TTM)", "yAxisIndex": 0, "data": df["pe_ttm"].tolist()},
+                    {"name": "PB", "yAxisIndex": 1, "data": df["pb"].tolist()},
+                ],
+            },
         }
 
         conclusion = f"PE(TTM) {pe if pe is not None else 'N/A'}，PB {pb if pb is not None else 'N/A'}，总市值 {_fmt_billions(total_mv)}。"
@@ -454,6 +471,7 @@ class StockAnalysisRunner:
                 "type": fc.get("type"),
                 "p_change_min": _safe_float(fc.get("p_change_min")),
                 "p_change_max": _safe_float(fc.get("p_change_max")),
+                "ann_date": fc.get("ann_date"),
             }
 
         # F-Score 需要三张表
@@ -480,14 +498,26 @@ class StockAnalysisRunner:
             "forecast": forecast_info,
             "fscore": fscore,
             "growth": growth,
+            "chart": {
+                "title": "近8期 ROE/毛利率/净利率（%）",
+                "type": "line",
+                "dates": [str(e) for e in trend["end_date"].tolist()],
+                "series": [
+                    {"name": "ROE", "data": [v if v == v else None for v in trend["roe"].tolist()]},
+                    {"name": "毛利率", "data": [v if v == v else None for v in trend["grossprofit_margin"].tolist()]},
+                    {"name": "净利率", "data": [v if v == v else None for v in trend["netprofit_margin"].tolist()]},
+                ],
+            },
         }
 
         roe = data["latest"]["roe"]
         gm = data["latest"]["grossprofit_margin"]
         debt = data["latest"]["debt_to_assets"]
+        _period_m = str(latest.get("end_date", ""))[4:6]
+        _roe_note = "" if _period_m == "12" else "（非年化口径）"
         conclusion = (
             f"最新报告期 {latest.get('end_date')}："
-            f"ROE {roe if roe is not None else 'N/A'}%，"
+            f"ROE {roe if roe is not None else 'N/A'}%{_roe_note}，"
             f"毛利率 {gm if gm is not None else 'N/A'}%，"
             f"资产负债率 {debt if debt is not None else 'N/A'}%。"
         )
@@ -495,14 +525,20 @@ class StockAnalysisRunner:
             conclusion += f" Piotroski F-Score {fscore.get('F-Score', 'N/A')}（{fscore.get('rating', '')}）。"
         if growth:
             conclusion += (
-                f" 营收YoY {growth.get('revenue_yoy', 'N/A')}%，"
-                f"净利润YoY {growth.get('profit_yoy', 'N/A')}%。"
+                f" 营收同比 {growth.get('revenue_yoy', 'N/A')}%，"
+                f"净利润同比 {growth.get('profit_yoy', 'N/A')}%。"
             )
         if forecast_info:
-            conclusion += (
-                f"业绩预告：{forecast_info['type']}，"
-                f"净利润变动 {forecast_info['p_change_min']}%~{forecast_info['p_change_max']}%。"
-            )
+            if self._forecast_stale(forecast_info):
+                conclusion += (
+                    f"最近业绩预告发布于 {forecast_info['ann_date']}（报告期 {forecast_info['end_date']}），"
+                    f"距今已超 150 天未更新，该预告已过期，不作为当前业绩参考。"
+                )
+            else:
+                conclusion += (
+                    f"{self._forecast_label(forecast_info)}：{forecast_info['type']}，"
+                    f"净利润变动 {forecast_info['p_change_min']}%~{forecast_info['p_change_max']}%。"
+                )
 
         return DimensionResult.success("财务质量", conclusion=conclusion, data=data)
 
@@ -576,6 +612,15 @@ class StockAnalysisRunner:
             "elg_net_5d_billion": elg_5,
             "elg_net_20d_billion": elg_20,
             "block_trade": block_summary,
+            "chart": {
+                "title": "主力资金净流入（万元）",
+                "type": "bar",
+                "dates": df["trade_date"].tolist(),
+                "series": [
+                    {"name": "主力净流入", "data": df["net_mf_amount"].tolist()},
+                    {"name": "超大单净流入", "data": df["elg_net"].tolist()},
+                ],
+            },
         }
 
         conclusion = f"近5日主力净流入 {net_5:.2f}亿" if net_5 is not None else "近5日主力净流入 N/A"
@@ -888,8 +933,8 @@ class StockAnalysisRunner:
             if isinstance(debt, (int, float)) and debt > 80:
                 risks.append(f"资产负债率 {debt}% 较高")
             fc = financial.data.get("forecast")
-            if fc and fc.get("type") in ("预减", "首亏", "续亏", "略减"):
-                risks.append(f"业绩预告类型：{fc['type']}")
+            if fc and fc.get("type") in ("预减", "首亏", "续亏", "略减") and (self._forecast_days(fc) or 999) <= 150:
+                risks.append(f"业绩预告类型：{fc['type']}（报告期 {fc.get('end_date', '')}）")
 
         moneyflow = self.results.get("moneyflow")
         if moneyflow and moneyflow.is_ok() and moneyflow.data:
@@ -1046,7 +1091,41 @@ class StockAnalysisRunner:
                     lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                     else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x))
                 )
-        return df.to_markdown(index=False, disable_numparse=True)
+        return df_to_md_table(df)
+
+    def _forecast_days(self, fc):
+        """业绩预告距今天的自然日数；ann_date 缺失或解析失败返回 None。"""
+        ann = fc.get("ann_date") if isinstance(fc, dict) else None
+        if not ann:
+            return None
+        try:
+            return (datetime.strptime(self.end_date, "%Y%m%d") - datetime.strptime(ann, "%Y%m%d")).days
+        except Exception:
+            return None
+
+    def _forecast_label(self, fc):
+        """业绩预告带报告期/公告日的展示标签，超 150 天未更新标注可能过期。"""
+        end = fc.get("end_date")
+        label = f"业绩预告（报告期 {end or '?'}"
+        days = self._forecast_days(fc)
+        if days is not None:
+            label += f"，{fc.get('ann_date')} 公告"
+            if days > 150:
+                label += "，⚠️ 距今已超 150 天，期间或未发布新预告"
+        label += "）"
+        return label
+
+    def _forecast_stale(self, fc):
+        """预告距今超过 150 天视为过期（期间公司未再发新预告）。"""
+        return (self._forecast_days(fc) or 999) > 150
+
+    def _annualized_roe(self, financial):
+        """按报告期年化 ROE（一季报×4 / 中报×2 / 三季报×4/3 / 年报×1），避免半年口径误判盈利强弱。"""
+        roe = self._f(self._v(financial.data, "latest", "roe"))
+        if roe is None:
+            return None
+        m = str((financial.data.get("latest") or {}).get("end_date", ""))[4:6]
+        return roe * {"03": 4, "06": 2, "09": 4 / 3}.get(m, 1)
 
     def _v(self, d, *keys, default="N/A"):
         """安全取嵌套值。"""
@@ -1062,10 +1141,12 @@ class StockAnalysisRunner:
             self.run()
 
         name = self.stock_name or self.ts_code
+        _dts = self.results.get("trend")
+        _ds = _dts.data.get("chart", {}).get("dates") if (_dts and _dts.is_ok() and _dts.data) else None
         lines = [
             f"# {name} 全景研究报告",
             "",
-            f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）",
+            f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
         ]
 
@@ -1156,7 +1237,7 @@ class StockAnalysisRunner:
             elif vol is not None and vol > 35:
                 tags.append("高波动")
         if fin_ok:
-            roe = self._f(self._v(financial.data, "latest", "roe"))
+            roe = self._annualized_roe(financial)
             if roe is not None and roe > 15:
                 tags.append("高盈利")
             elif roe is not None and roe < 5:
@@ -1199,8 +1280,14 @@ class StockAnalysisRunner:
             rev_yoy = self._v(g, "revenue_yoy")
             prof_yoy = self._v(g, "profit_yoy")
             fc = financial.data.get("forecast", {})
-            fc_text = f"，业绩预告{fc.get('type','N/A')}({fc.get('p_change_min','')}%~{fc.get('p_change_max','')}%)" if fc and fc.get("type") else ""
-            points.append(f"- **财务**：ROE {self._fmt(roe)}%，净利率 {self._fmt(npm)}%，资产负债率 {self._fmt(debt)}%，营收YoY {self._fmt(rev_yoy)}%，净利润YoY {self._fmt(prof_yoy)}%{fc_text}")
+            if fc and fc.get("type"):
+                if self._forecast_stale(fc):
+                    fc_text = (f"，业绩预告已过期（{fc.get('ann_date')} 公告，报告期 {fc.get('end_date')}），不作为当前参考")
+                else:
+                    fc_text = f"，{self._forecast_label(fc)}({fc.get('p_change_min','')}%~{fc.get('p_change_max','')}%)"
+            else:
+                fc_text = ""
+            points.append(f"- **财务**：ROE {self._fmt(roe)}%，净利率 {self._fmt(npm)}%，资产负债率 {self._fmt(debt)}%，营收同比 {self._fmt(rev_yoy)}%，净利润同比 {self._fmt(prof_yoy)}%{fc_text}")
         if mf_ok:
             net5 = self._v(moneyflow.data, "net_inflow_5d_billion")
             net20 = self._v(moneyflow.data, "net_inflow_20d_billion")
@@ -1242,7 +1329,7 @@ class StockAnalysisRunner:
             elif beta is not None and beta > 1.2:
                 style_parts.append("进攻型/高弹性")
         if fin_ok:
-            roe = self._f(self._v(financial.data, "latest", "roe"))
+            roe = self._annualized_roe(financial)
             if roe is not None and roe > 15:
                 style_parts.append("高盈利质量")
             elif roe is not None and roe < 5:
@@ -1250,7 +1337,9 @@ class StockAnalysisRunner:
 
         if style_parts:
             lines.append("")
-            lines.append(f"**风格定位**：{name}属于{'/'.join(style_parts)}型资产。")
+            _st = "/".join(style_parts)
+            _st = _st[:-1] if _st.endswith("型") else _st  # 元素自带"型"后缀，避免"防御型型资产"
+            lines.append(f"**风格定位**：{name}属于{_st}型资产。")
 
         # ---- 结论 ----
         concl_parts = []
@@ -1270,7 +1359,7 @@ class StockAnalysisRunner:
             if debt is not None and debt > 80:
                 concl_parts.append("资产负债率偏高需关注")
             fc = financial.data.get("forecast", {})
-            if fc and fc.get("type") in ("预增", "略增"):
+            if fc and fc.get("type") in ("预增", "略增") and (self._forecast_days(fc) or 999) <= 150:
                 concl_parts.append("业绩预告正向")
         if mf_ok:
             net5 = self._f(self._v(moneyflow.data, "net_inflow_5d_billion"))
@@ -1301,8 +1390,21 @@ class StockAnalysisRunner:
             }
             rows = []
             for k, v in data.items():
-                if v is not None and str(v) != "nan":
-                    rows.append({"项目": label_map.get(k, k), "内容": str(v)})
+                if v is None or str(v) == "nan":
+                    continue
+                if k == "list_date" and str(v).isdigit() and len(str(v)) == 8:
+                    v = f"{str(v)[:4]}-{str(v)[4:6]}-{str(v)[6:]}"
+                elif k == "reg_capital":
+                    try:
+                        v = f"{float(v) / 1e4:.2f}亿"
+                    except Exception:
+                        pass
+                elif k == "employees":
+                    try:
+                        v = f"{int(v):,}"
+                    except Exception:
+                        pass
+                rows.append({"项目": label_map.get(k, k), "内容": str(v)})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 
@@ -1366,7 +1468,11 @@ class StockAnalysisRunner:
                 adv.append(f"滚动夏普(60日) {rs.get('当前滚动夏普','N/A')}({rs.get('趋势','')})")
             if data.get("relative_strength"):
                 rs = data["relative_strength"]
-                adv.append(f"相对强度RS {rs.get('RS','N/A')}({rs.get('trend','')})")
+                try:
+                    _rsv = "跑赢" if float(rs.get("RS", 0)) > 1 else "跑输"
+                except Exception:
+                    _rsv = ""
+                adv.append(f"相对强度RS {rs.get('RS','N/A')}（{_rsv}，趋势{rs.get('trend','')}）")
             if data.get("tail_risk"):
                 tr = data["tail_risk"]
                 adv.append(f"尾部风险: 偏度{tr.get('偏度','N/A')}, 峰度{tr.get('峰度(超额)','N/A')}")
@@ -1425,8 +1531,8 @@ class StockAnalysisRunner:
             if g:
                 lines.append(f"\n**营收/净利润增速**：最新 {g.get('latest_end_date','N/A')} vs 上年同期 {g.get('yoy_end_date','N/A')}")
                 g_rows = [
-                    {"指标": "营收YoY%", "数值": self._fmt(g.get("revenue_yoy"))},
-                    {"指标": "净利润YoY%", "数值": self._fmt(g.get("profit_yoy"))},
+                    {"指标": "营收同比%", "数值": self._fmt(g.get("revenue_yoy"))},
+                    {"指标": "净利润同比%", "数值": self._fmt(g.get("profit_yoy"))},
                 ]
                 lines.append(self._md(pd.DataFrame(g_rows)))
             fs = data.get("fscore", {})
@@ -1436,9 +1542,12 @@ class StockAnalysisRunner:
                     lines.append(f"- {fs['comp_note']}")
             fc = data.get("forecast", {})
             if fc:
-                lines.append("\n**业绩预告**：")
-                fc_rows = [{"指标": k, "数值": str(v)} for k, v in fc.items()]
-                lines.append(self._md(pd.DataFrame(fc_rows)))
+                if self._forecast_stale(fc):
+                    lines.append(f"- **业绩预告（已过期）**：最近一条发布于 {fc.get('ann_date')}（报告期 {fc.get('end_date')}），距今超 150 天未更新，不作为当前业绩参考")
+                else:
+                    lines.append("\n**业绩预告**：")
+                    fc_rows = [{"指标": k, "数值": str(v)} for k, v in fc.items()]
+                    lines.append(self._md(pd.DataFrame(fc_rows)))
             lines.append("")
             lines.append(self._financial_eval(data))
 
@@ -1490,7 +1599,7 @@ class StockAnalysisRunner:
             import pandas as pd
             rows = [
                 {"指标": "融资余额(亿)", "数值": self._fmt(data.get("rzye_billion"))},
-                {"指标": "融券余量", "数值": self._fmt(data.get("rqyl"))},
+                {"指标": "融券余量(股)", "数值": self._fmt(data.get("rqyl"))},
                 {"指标": "近5日融资余额变化%", "数值": self._fmt(data.get("rzye_chg_5d_pct"))},
             ]
             lines.append(self._md(pd.DataFrame(rows)))
@@ -1588,7 +1697,7 @@ class StockAnalysisRunner:
         try:
             rev_f = float(rev)
             prof_f = float(prof)
-            parts.append(f"营收YoY {rev_f}%、净利润YoY {prof_f}%，业绩{'向好' if rev_f > 10 and prof_f > 10 else '承压' if rev_f < 0 or prof_f < 0 else '平稳'}。")
+            parts.append(f"营收同比 {rev_f}%、净利润同比 {prof_f}%，业绩{'向好' if rev_f > 10 and prof_f > 10 else '承压' if rev_f < 0 or prof_f < 0 else '平稳'}。")
         except Exception:
             pass
         comp = data.get("latest", {}).get("grossprofit_margin")
@@ -1618,7 +1727,12 @@ class StockAnalysisRunner:
         signal = data.get("signal", "")
         trade = data.get("holder_trade", {})
         parts = []
-        if "集中" in signal:
+        if "中期筹码趋于集中" in signal:
+            qoq = self._f(data.get("latest_qoq")) or 0
+            parts.append(f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，筹码趋于集中；最新一期环比 {self._fmt(data.get('latest_qoq'))}%，{'继续下降' if qoq < 0 else '有所回升'}。需结合量价验证是否为有效吸筹。")
+        elif "中期筹码趋于分散" in signal:
+            parts.append(f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，筹码趋于分散；最新一期环比 {self._fmt(data.get('latest_qoq'))}%。需警惕高位派发风险。")
+        elif "集中" in signal:
             parts.append("股东户数减少，筹码趋于集中，通常与人均持股上升相关，但需结合股价位置与成交量判断是否为有效吸筹。")
         elif "分散" in signal:
             parts.append("股东户数增加，筹码趋于分散，通常与人均持股下降相关，需警惕高位派发风险。")
@@ -1677,7 +1791,8 @@ def stock_report(
     dimensions: Optional[List[str]] = None,
 ) -> str:
     runner = StockAnalysisRunner(ts_code=ts_code, end_date=end_date, dimensions=dimensions)
-    return runner.report()
+    md = runner.report()
+    return render_html_report(md, runner.results)
 
 
 if __name__ == "__main__":
@@ -1696,14 +1811,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         default=None,
-        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+        help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
 
     dims = args.dimensions.split(",") if args.dimensions else None
     report = stock_report(args.ts_code, args.end_date, dims)
-    output = args.output or f"{args.ts_code}_report.md"
+    output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"报告已保存: {os.path.abspath(output)}")
-    print(report)
+    print(f"HTML 报告已保存: {os.path.abspath(output)}")

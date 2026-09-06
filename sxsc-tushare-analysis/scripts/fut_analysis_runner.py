@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from basic_metrics import calc_ma, calc_max_drawdown, calc_returns, calc_sharpe, calc_volatility
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
+from report_html import df_to_md_table, render_html_report
 from technical_indicators import calc_boll, calc_kdj, calc_macd, calc_rsi
 
 # 交易所后缀 -> 中文名（用于持仓排名覆盖判断）
@@ -154,7 +155,15 @@ class FutAnalysisRunner:
         latest_oi = _safe_float(daily.iloc[-1].get("oi")) if "oi" in daily.columns else None
         data = {"returns": ret, "latest_close": latest_close, "latest_settle": latest_settle,
                 "latest_oi": latest_oi, "volatility": vol, "max_drawdown": mdd, "sharpe": sh,
-                "ma": ma, "macd": macd, "rsi": rsi, "kdj": kdj, "boll": boll, "daily": daily}
+                "ma": ma, "macd": macd, "rsi": rsi, "kdj": kdj, "boll": boll, "daily": daily,
+                "chart": {
+                    "title": "主力连续合约日线（未复权）",
+                    "type": "candlestick",
+                    "dates": daily["trade_date"].tolist(),
+                    "ohlc": daily[["open", "close", "low", "high"]].values.tolist(),
+                    "vol": daily["vol"].tolist() if "vol" in daily.columns else [],
+                },
+            }
         conclusion = (f"最新收盘 {latest_close}，近20日 {ret.get('近20日涨幅%','N/A')}%，"
                       f"近250日 {ret.get('近250日涨幅%','N/A')}%，年化波动 {vol}%，最大回撤 {mdd}%。")
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
@@ -339,7 +348,7 @@ class FutAnalysisRunner:
                 df[col] = df[col].apply(lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                                         else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x)))
         try:
-            return df.to_markdown(index=False, disable_numparse=True)
+            return df_to_md_table(df)
         except Exception:
             return df.to_string(index=False)
 
@@ -347,7 +356,9 @@ class FutAnalysisRunner:
         if not self.results:
             self.run()
         name = self.fut_name or self.symbol
-        lines = [f"# {name} 全景研究报告", "", f"> 数据日期：{self.end_date}（Tushare 数据为 T-1 日）", ""]
+        _dts = self.results.get("trend")
+        _ds = _dts.data.get("chart", {}).get("dates") if (_dts and _dts.is_ok() and _dts.data) else None
+        lines = [f"# {name} 全景研究报告", "", f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）", ""]
         dim_order = [d for d in self.dimensions if d in self.results]
         risk_dim = "risk" if "risk" in dim_order else None
         ordered = [d for d in dim_order if d != "risk"]
@@ -512,7 +523,8 @@ def analyze_futures(ts_code: str, end_date: Optional[str] = None,
 def fut_report(ts_code: str, end_date: Optional[str] = None,
                dimensions: Optional[List[str]] = None) -> str:
     runner = FutAnalysisRunner(ts_code=ts_code, end_date=end_date, dimensions=dimensions)
-    return runner.report()
+    md = runner.report()
+    return render_html_report(md, runner.results)
 
 
 if __name__ == "__main__":
@@ -525,12 +537,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         default=None,
-        help="markdown 报告输出路径，默认保存到当前目录 {ts_code}_report.md",
+        help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
     report = fut_report(args.ts_code, args.end_date)
-    output = args.output or f"{args.ts_code}_report.md"
+    output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"报告已保存: {os.path.abspath(output)}")
-    print(report)
+    print(f"HTML 报告已保存: {os.path.abspath(output)}")

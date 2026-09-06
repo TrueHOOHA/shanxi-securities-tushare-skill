@@ -294,7 +294,7 @@ class DataAPI:
     # ---------- 基金 ----------
 
     def get_fund_basic(self, ts_code: str, fields: Optional[str] = None) -> Optional[pd.DataFrame]:
-        f = fields or "ts_code,name,fund_type,found_date,issue_date,delist_date"
+        f = fields or "ts_code,name,fund_type,found_date,list_date,delist_date"
         return self._call("fund_basic", {"ts_code": ts_code}, f)
 
     def get_fund_nav(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
@@ -372,7 +372,7 @@ class DataAPI:
 
     # ---------- 全市场两融汇总 ----------
 
-    def get_margin(self, end_date: str, exchange_id: str = "SSE", lookback_days: int = 60) -> Optional[pd.DataFrame]:
+    def get_margin(self, end_date: str, exchange_id: str = "SSE", lookback_days: int = 250) -> Optional[pd.DataFrame]:
         start_date = shift_date(end_date, -lookback_days)
         return self._call("margin", {"exchange_id": exchange_id, "start_date": start_date, "end_date": end_date},
                           "trade_date,exchange_id,rzye,rzmre,rzche,rqye,rqmcl,rzrqye,rqyl")
