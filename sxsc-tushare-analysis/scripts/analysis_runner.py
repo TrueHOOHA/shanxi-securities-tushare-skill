@@ -1968,12 +1968,7 @@ class StockAnalysisRunner:
             elif net5 is not None and net5 > 2:
                 concl_parts.append("短期资金流入")
 
-        if concl_parts:
-            lines.append("")
-            value_trait = "当前呈现低估值/高股息特征，符合价值型资产的一般画像" if tags and ("低估值" in tags or "高股息" in tags) else "暂无明显的价值或成长极端特征，需结合行业景气度与业绩趋势进一步跟踪"
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，{value_trait}。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
-
-        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
+        # ---- 因子综合评分 + 三维定位 + 风险预算（分析输入，置于结论之前）----
         try:
             pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile")) if val_ok else None
             fscore = self._f(self._v(financial.data.get("fscore") or {}, "F-Score")) if fin_ok else None
@@ -2009,6 +2004,11 @@ class StockAnalysisRunner:
                         lines.append(f"- {r}")
         except Exception:
             pass
+
+        if concl_parts:
+            lines.append("")
+            value_trait = "当前呈现低估值/高股息特征，符合价值型资产的一般画像" if tags and ("低估值" in tags or "高股息" in tags) else "暂无明显的价值或成长极端特征，需结合行业景气度与业绩趋势进一步跟踪"
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，{value_trait}。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
 
         return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
 
