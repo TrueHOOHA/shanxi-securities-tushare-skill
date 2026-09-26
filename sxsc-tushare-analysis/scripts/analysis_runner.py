@@ -45,9 +45,9 @@ from risk_modeling import (
 )
 from technical_indicators import calc_boll, calc_kdj, calc_macd, calc_rsi, calc_volume_ratio
 from factor_signals import (
-    calc_amplitude_momentum, calc_cgo, calc_convergence_factor,
+    calc_amplitude_momentum, calc_cgo,
     calc_ideal_amplitude, calc_quantitative_momentum, calc_salience_score,
-    calc_shadow_factors, calc_trend_momentum,
+    calc_shadow_factors,
 )
 
 
@@ -361,7 +361,9 @@ class StockAnalysisRunner:
                 dd = dd.dropna(subset=["ex_date"])
                 # 去重：同除权日同金额的重复记录（dividend 接口含多阶段重复披露）
                 dd = dd.drop_duplicates(subset=["ex_date", "cash_div_tax"])
-                dd = dd[dd["cash_div_tax"] > 0] if "cash_div_tax" in dd.columns else dd  # 剔除纯送转/零现金行
+                if "cash_div_tax" in dd.columns:
+                    dd["cash_div_tax"] = pd.to_numeric(dd["cash_div_tax"], errors="coerce")
+                    dd = dd[dd["cash_div_tax"] > 0]  # 剔除纯送转/零现金行（to_numeric 防 dtype 漂移为 str 时比较报错）
                 cutoff = shift_date(self.end_date, -365 * 3)
                 dd = dd[dd["ex_date"].astype(str) >= cutoff].sort_values("ex_date")
                 if not dd.empty:
@@ -1291,18 +1293,20 @@ class StockAnalysisRunner:
             price = df["close_post"].sort_index()
             high = df["high_post"].sort_index()
             low = df["low_post"].sort_index()
+            _src = "复权行情(adj_factor)"
         else:
             df = df_daily.sort_values("trade_date").set_index("trade_date")
             price = df["close"].sort_index()
             high = df["high"].sort_index()
             low = df["low"].sort_index()
+            _src = "未复权行情（缺复权因子，送转日因子可能失真）"
         if len(price) < 121:
             return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
 
         qm = calc_quantitative_momentum(price, window=60)
         am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3)
-        data = {"quantitative_momentum": qm, "amplitude_momentum": am}
-        conclusion = "动量质量因子分析。"
+        data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
+        conclusion = f"动量质量因子分析（数据源：{_src}）。"
         insights = []
         if qm:
             insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
@@ -2262,6 +2266,8 @@ class StockAnalysisRunner:
             if am:
                 rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
                 rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+            if data.get("source"):
+                rows.append({"指标": "数据源", "数值": data["source"]})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 

@@ -197,7 +197,12 @@ class FutAnalysisRunner:
                     _last = d2.iloc[-1]
                     vr_latest = round(float(_last["vol"] / _last["oi"]), 4) if _last["oi"] else None
                     oi_chg5 = round((float(_last["oi"]) / float(d2.iloc[-6]["oi"]) - 1) * 100, 2) if d2.iloc[-6]["oi"] else None
-            _vr_txt = f"。近5日持仓量变化 {oi_chg5:+.2f}%，最新量仓比(成交量/持仓量) {vr_latest}" if vr_latest is not None else ""
+            _vr_parts = []
+            if oi_chg5 is not None:
+                _vr_parts.append(f"近5日持仓量变化 {oi_chg5:+.2f}%")
+            if vr_latest is not None:
+                _vr_parts.append(f"最新量仓比(成交量/持仓量) {vr_latest}")
+            _vr_txt = ("。" + "，".join(_vr_parts)) if _vr_parts else ""
             note = note.rstrip("。") + _vr_txt + ("。" if _vr_txt else "")
 
             return DimensionResult.success("持仓分析", conclusion=note, data={"holding_records": None, "oi_series": (oi_series.tail(10).to_dict() if oi_series is not None else None), "vr_latest": vr_latest, "oi_chg5": oi_chg5})

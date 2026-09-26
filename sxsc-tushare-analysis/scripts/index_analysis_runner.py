@@ -410,20 +410,24 @@ class IndexAnalysisRunner:
             return DimensionResult.empty("动量质量", note="无法获取指数行情")
         df = df.set_index("trade_date").sort_index()
         price = df["close"]
-        high = df["high"] if "high" in df.columns else price
-        low = df["low"] if "low" in df.columns else price
+        has_ohlc = "high" in df.columns and "low" in df.columns
+        high = df["high"] if has_ohlc else None
+        low = df["low"] if has_ohlc else None
+        _src = "指数日线" if has_ohlc else "指数日线（缺 high/low，振幅切割不适用）"
         if len(price) < 121:
             return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
 
         qm = calc_quantitative_momentum(price, window=60)
-        am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3)
-        data = {"quantitative_momentum": qm, "amplitude_momentum": am}
-        conclusion = "动量质量因子分析。"
+        am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3) if has_ohlc else None
+        data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
+        conclusion = f"动量质量因子分析（数据源：{_src}）。"
         insights = []
         if qm:
             insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
         if am:
             insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+        elif not has_ohlc:
+            insights.append("行情缺 high/low 列，振幅切割动量不适用")
         if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
             insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
         return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
@@ -956,6 +960,8 @@ class IndexAnalysisRunner:
             if am:
                 rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
                 rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+            if data.get("source"):
+                rows.append({"指标": "数据源", "数值": data["source"]})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 

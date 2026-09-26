@@ -29,15 +29,16 @@ def calc_convergence_factor(series, periods=(1, 5, 10, 20, 60, 120)):
     series: 日期升序的 Series（close/vol/amount/turnover）。
     返回最新因子值（float，越大/接近0=越收敛）或 None（数据不足）。
     注意：vol/amount 未复权，送转日附近因子值可能跳变；跨标的不可比（未截面标准化）。
+    均线先按当前价归一（MA_p/当前价）再求 std，因子值无量纲、跨时间可比。
     """
     if series is None or len(series) < max(periods):
         return None
-    mas = []
-    for p in periods:
-        mas.append(float(series.tail(p).mean()) if p > 1 else float(series.iloc[-1]))
-    std = float(np.std(mas, ddof=0))
-    if std < 0 or (1 + std) <= 0:
+    cur = float(series.iloc[-1])
+    if cur <= 0:
         return None
+    # 均线先除以当前价归一化（MA_p/cur），消除价格量纲，跨时间可比；p=1 归一后恒为 1
+    mas = [float(series.tail(p).mean()) / cur if p > 1 else 1.0 for p in periods]
+    std = float(np.std(mas, ddof=0))
     return round(-np.log(1 + std), 4)
 
 
@@ -132,7 +133,7 @@ def calc_shadow_factors(open_, high, low, close, std_window=5, lookback=20):
 def calc_ideal_amplitude(close, high, low, n=20, lam=0.2):
     """理想振幅 V(λ) = V_high(λ) - V_low(λ)（振幅因子的隐藏结构）。
 
-    按窗口内 close 的 rank(pct) 切割：>= λ 为高价组，< λ 为低价组。
+    按窗口内 close 的 rank(pct) 切割：最高 λ 分位为高价组（rank > 1-λ），最低 λ 分位为低价组（rank ≤ λ），两组各占约 λ 比例（对称尾部）。
     V_high = 高价组振幅均值，V_low = 低价组振幅均值。
     V<0 = 低价区振幅大于高价区（负向选股能力弱）；V>0 = 高价区振幅大（状态跃迁效应强）。
     返回 dict(v_high, v_low, v, lam) 或 None。
@@ -142,8 +143,8 @@ def calc_ideal_amplitude(close, high, low, n=20, lam=0.2):
     df = pd.DataFrame({"close": close, "high": high, "low": low}).tail(n).copy()
     df["amp"] = df["high"] / df["low"] - 1
     df["rank"] = df["close"].rank(pct=True)
-    high_grp = df[df["rank"] >= lam]
-    low_grp = df[df["rank"] < lam]
+    high_grp = df[df["rank"] > 1 - lam]
+    low_grp = df[df["rank"] <= lam]
     if high_grp.empty or low_grp.empty:
         return None
     v_high = float(high_grp["amp"].mean())
@@ -196,6 +197,7 @@ def calc_cgo(close, amount, vol, turnover_rate, n=100):
         return None
     df = pd.DataFrame({"close": close, "amount": amount, "vol": vol, "turnover": turnover_rate}).tail(n).copy()
     df = df.dropna(subset=["close", "amount", "vol", "turnover"])
+    df = df[df["vol"] > 0]  # 停牌日 vol=0 → vwap=inf，0×inf=nan 污染参考价 RP
     if len(df) < n // 2:
         return None
     df["vwap"] = df["amount"] * 1000 / (df["vol"] * 100)
