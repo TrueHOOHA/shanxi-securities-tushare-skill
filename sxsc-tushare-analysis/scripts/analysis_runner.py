@@ -35,6 +35,7 @@ from basic_metrics import (
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
+from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 from risk_modeling import (
     calc_amihud_illiquidity,
     calc_relative_strength,
@@ -539,14 +540,18 @@ class StockAnalysisRunner:
         forecast_info = None
         forecast_df = self.api.get_forecast(self.ts_code, self.end_date)
         if forecast_df is not None and not forecast_df.empty:
-            fc = forecast_df.sort_values("ann_date").iloc[-1]
-            forecast_info = {
-                "end_date": fc.get("end_date"),
-                "type": fc.get("type"),
-                "p_change_min": _safe_float(fc.get("p_change_min")),
-                "p_change_max": _safe_float(fc.get("p_change_max")),
-                "ann_date": fc.get("ann_date"),
-            }
+            # 过滤过期预告：若预告对应报告期已出正式财报（end_date 已在 fina_indicator 已公布报告期内），该预告已被实绩替代，不再引用
+            reported_ends = set(df["end_date"].astype(str).tolist()) if "end_date" in df.columns else set()
+            pending = forecast_df[~forecast_df["end_date"].astype(str).isin(reported_ends)]
+            if not pending.empty:
+                fc = pending.sort_values("ann_date").iloc[-1]
+                forecast_info = {
+                    "end_date": fc.get("end_date"),
+                    "type": fc.get("type"),
+                    "p_change_min": _safe_float(fc.get("p_change_min")),
+                    "p_change_max": _safe_float(fc.get("p_change_max")),
+                    "ann_date": fc.get("ann_date"),
+                }
 
         # F-Score 需要三张表
         fscore = None
@@ -1601,6 +1606,24 @@ class StockAnalysisRunner:
         "risk": "风险提示",
     }
 
+    # 各维度含义描述（面向非专业读者，标题后以引用块呈现，区别于数据描述句）
+    DIM_DESCRIPTIONS = {
+        "overview": "标的基础档案：代码、行业、上市地、主业与规模，回答“这是什么公司”。",
+        "trend": "价格走势与动量：区间涨跌幅、波动率、回撤、技术指标与基准对比，判断趋势方向与风险水平。",
+        "valuation": "估值水平：PE/PB/股息率及其历史分位与行业截面分位，判断“贵不贵”。",
+        "financial": "财务质量：ROE、毛利率、负债率、增速与 F-Score，判断“赚不赚钱、稳不稳”。",
+        "moneyflow": "资金动向：主力/超大单/北向资金净流入，判断大资金在买还是卖。",
+        "shareholder": "股东筹码：户数变化、前十大持股与大股东增减持，判断筹码集中度与机构动向。",
+        "float": "解禁压力：未来3个月限售股释放计划，判断潜在的供给冲击。",
+        "margin": "两融杠杆：融资融券余额变化，判断市场杠杆情绪与追高/撤离信号。",
+        "market_activity": "市场异动：涨跌停、龙虎榜与机构席位，捕捉短期资金的极端关注。",
+        "macro": "宏观环境：大盘走势、CPI/PPI、LPR 与 GDP，判断整体顺风或逆风。",
+        "momentum_quality": "动量质量：用风险调整后的动量得分，判断涨势是稳健的小波动驱动（高质量）还是少数大波动堆出来的（低质量、持续性存疑）。",
+        "microstructure": "微观结构：从K线影线、实体与振幅分布看多空在盘中的支撑与攻击力度。",
+        "behavioral": "行为金融：从凸显度、处置效应与参考点看市场情绪偏差与投资者心理锚。",
+        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+    }
+
     def _fmt(self, x, digits=2):
         """数值格式化。"""
         if x is None:
@@ -1711,6 +1734,9 @@ class StockAnalysisRunner:
             res = self.results[dim]
             title = self.DIM_TITLES.get(dim, res.title)
             lines.append(f"## {idx}. {title}")
+            desc = self.DIM_DESCRIPTIONS.get(dim)
+            if desc:
+                lines.append(f"> {desc}")
             if res.conclusion:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
@@ -1932,7 +1958,45 @@ class StockAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，" + ("适合作为价值型配置关注" if tags and ("低估值" in tags or "高股息" in tags) else "需结合行业景气度与业绩趋势进一步判断") + "，注意分散风险，不构成投资建议。")
+            value_trait = "当前呈现低估值/高股息特征，符合价值型资产的一般画像" if tags and ("低估值" in tags or "高股息" in tags) else "暂无明显的价值或成长极端特征，需结合行业景气度与业绩趋势进一步跟踪"
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，{value_trait}。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+
+        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
+        try:
+            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile")) if val_ok else None
+            fscore = self._f(self._v(financial.data.get("fscore") or {}, "F-Score")) if fin_ok else None
+            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%")) if trend_ok else None
+            sharpe = self._f(self._v(trend.data, "sharpe")) if trend_ok else None
+
+            composite = calc_composite_score(pe_hist, fscore, ret250, sharpe, None)
+            if composite.get("composite") is not None:
+                lines.append("")
+                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
+                fac = composite.get("factors", {})
+                if fac:
+                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
+
+            positioning = calc_factor_positioning(pe_hist, fscore, ret250)
+            if positioning.get("positioning"):
+                lines.append("")
+                lines.append(f"**因子定位**：{positioning['positioning']}")
+
+            if trend_ok:
+                var_cvar = trend.data.get("var_cvar") or {}
+                var95_str = var_cvar.get("VaR(95%)")
+                var95 = self._f(str(var95_str).rstrip("%")) if isinstance(var95_str, str) else None
+                mdd = self._f(self._v(trend.data, "max_drawdown"))
+                beta = self._f(self._v(trend.data.get("beta_alpha") or {}, "Beta"))
+                amihud = self._f(trend.data["amihud"].get("Amihud非流动性")) if trend.data.get("amihud") else None
+                vol = self._f(self._v(trend.data, "volatility"))
+                budget = calc_risk_budget(var95, mdd, beta, amihud, vol)
+                if budget.get("suggested_position_pct") is not None:
+                    lines.append("")
+                    lines.append(f"**风险预算**：{budget['risk_level']}风险等级（参考风险承受度约 {budget['suggested_position_pct']}%，基于回撤/波动/Beta/VaR 测算，为风险评估参考，非配置建议）")
+                    for r in budget.get("reasons", []):
+                        lines.append(f"- {r}")
+        except Exception:
+            pass
 
         return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
 
@@ -1993,8 +2057,13 @@ class StockAnalysisRunner:
                 row[bench.get("ts_code", "沪深300")] = self._fmt(bench_returns.get(k, "N/A"))
                 rows.append(row)
             lines.append(self._md(pd.DataFrame(rows)))
+            # 最新价同时给未复权与后复权口径，避免与后复权 MA 混用造成误读
             if data.get("latest_close_unadj") is not None:
-                lines.append(f"\n未复权最新价：{data['latest_close_unadj']}")
+                price_note = f"\n最新价：未复权 {self._fmt(data['latest_close_unadj'])}"
+                if data.get("latest_close_adj") is not None:
+                    price_note += f"，后复权 {self._fmt(data['latest_close_adj'])}"
+                price_note += "（下表均线、技术指标均为后复权口径）"
+                lines.append(price_note)
 
             # 风控指标对比表
             bench_code = bench.get("ts_code", "沪深300")
@@ -2340,13 +2409,15 @@ class StockAnalysisRunner:
         try:
             pe_f = float(pe_hist)
             pb_f = float(pb_hist)
-            parts.append(f"PE历史分位 {pe_f}%、PB历史分位 {pb_f}%，整体估值{'偏低' if pe_f < 30 and pb_f < 30 else '偏高' if pe_f > 70 or pb_f > 70 else '中等'}。")
+            vert = '偏低' if pe_f < 30 and pb_f < 30 else '偏高' if pe_f > 70 or pb_f > 70 else '中等'
+            parts.append(f"纵向历史看，PE分位{pe_f}%、PB分位{pb_f}%，历史估值{vert}；")
         except Exception:
             pass
         try:
             pe_v = float(pe)
             ind_v = float(ind_pe)
-            parts.append(f"当前PE {pe_v} {'高于' if pe_v > ind_v else '低于'}行业中位数 {ind_v}，{'相对偏贵' if pe_v > ind_v * 1.2 else '相对便宜' if pe_v < ind_v * 0.8 else '差异不大'}。")
+            horiz = '板块内相对偏贵' if pe_v > ind_v * 1.2 else '板块内相对便宜' if pe_v < ind_v * 0.8 else '与板块差异不大'
+            parts.append(f"横向行业截面看，当前PE {pe_v} {'高于' if pe_v > ind_v else '低于'}行业中位数 {ind_v}，{horiz}。")
         except Exception:
             pass
         # 高ROE个股的PB/PE截面背离解读：PB截面分位偏高可能由高ROE支撑，不构成高估证据
@@ -2359,7 +2430,7 @@ class StockAnalysisRunner:
         except Exception:
             pass
 
-        parts.append("估值需结合业绩增速与行业景气度判断，单一分位不能作为买卖依据。")
+        parts.append("纵向历史位与横向板块位反映不同口径，二者背离通常源于板块整体估值水位变化，需结合业绩增速与行业景气度综合判断，单一口径不构成买卖依据。")
         return "**分析评价**：" + "".join(parts)
 
     def _financial_eval(self, data):

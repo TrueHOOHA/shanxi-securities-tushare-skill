@@ -319,33 +319,33 @@ def calc_pair_relative_value(series_a, series_b, label_a="A", label_b="B"):
     }
 
 
-# ============ 7. 风险预算建议 ============
+# ============ 7. 风险预算（风险评估参考） ============
 def calc_risk_budget(var95=None, max_drawdown=None, beta=None, amihud=None, volatility=None):
-    """风险预算建议：基于 VaR/回撤/Beta/流动性 综合推算建议仓位上限。
+    """风险预算参考：基于 VaR/回撤/Beta/流动性 综合推算风险承受度参考值。
 
-    逻辑：
-      - 回撤越深 → 仓位越低（回撤<-40%→≤20%，<-25%→≤40%，其他→≤60%）
-      - 波动越高 → 仓位越低（>40%→额外降一档）
-      - 流动性差 → 仓位越低（Amihud>0.1→额外降一档）
-      - Beta 高 → 仓位越低（>1.2→额外降一档）
-    返回 dict：建议仓位 + 风险等级 + 各维风险信号 + 理由。
+    逻辑（各维风险信号综合，仅作风险评估参考，非配置建议）：
+      - 回撤越深 → 风险越高（回撤<-40%→参考≤20%，<-25%→参考≤40%，其他→参考≤60%）
+      - 波动越高 → 风险越高（>40%→参考值降一档）
+      - 流动性差 → 风险越高（Amihud>0.1→参考值降一档）
+      - Beta 高 → 风险越高（>1.2→参考值降一档）
+    返回 dict：风险承受度参考值 + 风险等级 + 各维风险信号 + 理由。
     """
-    base = 60  # 默认仓位上限
+    base = 60  # 默认参考值
     reasons = []
 
     if max_drawdown is not None:
         mdd = float(max_drawdown)
         if mdd < -40:
-            base = min(base, 20); reasons.append(f"最大回撤 {mdd}%（极深，仓位≤20%）")
+            base = min(base, 20); reasons.append(f"最大回撤 {mdd}%（极深）")
         elif mdd < -25:
-            base = min(base, 40); reasons.append(f"最大回撤 {mdd}%（较深，仓位≤40%）")
+            base = min(base, 40); reasons.append(f"最大回撤 {mdd}%（较深）")
         else:
             reasons.append(f"最大回撤 {mdd}%（可控）")
 
     if volatility is not None:
         vol = float(volatility)
         if vol > 40:
-            base = min(base, base - 10); reasons.append(f"年化波动 {vol}%（偏高，额外降仓）")
+            base = min(base, base - 10); reasons.append(f"年化波动 {vol}%（偏高）")
         else:
             reasons.append(f"年化波动 {vol}%（适中）")
 

@@ -29,6 +29,7 @@ from data_api import DataAPI, shift_date
 from factor_signals import calc_amplitude_momentum, calc_quantitative_momentum
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
+from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 
 
 def _today() -> str:
@@ -569,6 +570,19 @@ class IndexAnalysisRunner:
         "risk": "风险提示",
     }
 
+    # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
+    DIM_DESCRIPTIONS = {
+        "overview": "指数基础档案：代码、发布机构、基期与基点，回答“这是什么指数”。",
+        "trend": "指数走势：区间涨跌幅、波动率、回撤与均线，并与沪深300对比，判断趋势方向与相对强弱。",
+        "valuation": "估值水平：指数整体 PE/PB 及历史分位，判断“贵不贵”。",
+        "weight": "成分权重：前十大成分股及占比，判断指数受哪些大票主导。",
+        "sector": "行业分布：成分股按申万行业归类，判断指数的行业集中度。",
+        "global": "国际对比：与标普500/纳斯达克/恒生等指数的收益对比，判断相对国际市场的强弱。",
+        "margin": "两融/市场杠杆：全市场融资融券余额，判断整体市场杠杆情绪与风险偏好。",
+        "momentum_quality": "动量质量：用风险调整后的动量得分，判断指数涨势的稳健程度与持续性。",
+        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+    }
+
     def _overall_conclusion(self) -> str:
         parts = []
         trend = self.results.get("trend")
@@ -615,6 +629,9 @@ class IndexAnalysisRunner:
             res = self.results[dim]
             title = self.DIM_TITLES.get(dim, res.title)
             lines.append(f"## {idx}. {title}")
+            desc = self.DIM_DESCRIPTIONS.get(dim)
+            if desc:
+                lines.append(f"> {desc}")
             if res.conclusion:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
@@ -632,6 +649,9 @@ class IndexAnalysisRunner:
             idx += 1
             res = self.results[risk_dim]
             lines.append(f"## {idx}. 风险提示")
+            risk_desc = self.DIM_DESCRIPTIONS.get("risk")
+            if risk_desc:
+                lines.append(f"> {risk_desc}")
             if res.is_ok() and res.data:
                 for r in res.data.get("risks", []):
                     lines.append(f"- {r}")
@@ -780,7 +800,41 @@ class IndexAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，" + ("适合风险偏好型投资者关注" if tags and ("高波动" in tags or "估值偏高" in tags) else "可作为配置参考") + "，注意分散风险，不构成投资建议。")
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，需结合市场环境与自身风险承受度判断。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+        else:
+            lines.append("")
+            lines.append(f"**结论**：{name}当前各项指标相对中性。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+
+        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
+        try:
+            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile")) if val_ok else None
+            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%")) if trend_ok else None
+            sharpe = self._f(self._v(trend.data, "sharpe")) if trend_ok else None
+
+            composite = calc_composite_score(pe_hist, None, ret250, sharpe, None)
+            if composite.get("composite") is not None:
+                lines.append("")
+                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
+                fac = composite.get("factors", {})
+                if fac:
+                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
+
+            positioning = calc_factor_positioning(pe_hist, None, ret250)
+            if positioning.get("positioning"):
+                lines.append("")
+                lines.append(f"**因子定位**：{positioning['positioning']}")
+
+            if trend_ok:
+                mdd = self._f(self._v(trend.data, "max_drawdown"))
+                vol = self._f(self._v(trend.data, "volatility"))
+                budget = calc_risk_budget(None, mdd, None, None, vol)
+                if budget.get("suggested_position_pct") is not None:
+                    lines.append("")
+                    lines.append(f"**风险预算**：{budget['risk_level']}风险等级（参考风险承受度约 {budget['suggested_position_pct']}%，基于回撤/波动测算，为风险评估参考，非配置建议）")
+                    for r in budget.get("reasons", []):
+                        lines.append(f"- {r}")
+        except Exception:
+            pass
 
         return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
 

@@ -335,6 +335,17 @@ class FutAnalysisRunner:
     DIM_TITLES = {"overview": "概况", "trend": "行情趋势", "holding": "持仓分析",
                   "mapping": "主力合约", "wsr": "仓单库存", "settle": "结算参数", "risk": "风险提示"}
 
+    # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
+    DIM_DESCRIPTIONS = {
+        "overview": "合约基础档案：品种、交易所、主力合约与乘数等参数，回答“交易的是什么”。",
+        "trend": "价格走势：结算价/收盘价区间涨跌幅、波动率、回撤与技术指标，判断趋势方向。",
+        "holding": "持仓分析：前20会员多空持仓排名或持仓量序列，判断机构多空倾向与资金进出。",
+        "mapping": "主力合约：当前成交量最大的具体合约及换月记录，理解主力连续合约如何拼接。",
+        "wsr": "仓单库存：注册仓单量变化，反映可交割量增减（增加偏空、减少偏多）。",
+        "settle": "结算参数：每日结算价与保证金相关，影响盈亏结算与资金占用。",
+        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+    }
+
     def _fmt(self, x, digits=2):
         if x is None:
             return "N/A"
@@ -389,6 +400,9 @@ class FutAnalysisRunner:
             res = self.results[dim]
             title = self.DIM_TITLES.get(dim, res.title)
             lines.append(f"## {idx}. {title}")
+            desc = self.DIM_DESCRIPTIONS.get(dim)
+            if desc:
+                lines.append(f"> {desc}")
             if res.conclusion:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
@@ -400,6 +414,9 @@ class FutAnalysisRunner:
             idx += 1
             res = self.results[risk_dim]
             lines.append(f"## {idx}. 风险提示")
+            risk_desc = self.DIM_DESCRIPTIONS.get("risk")
+            if risk_desc:
+                lines.append(f"> {risk_desc}")
             if res.is_ok() and res.data:
                 for r in res.data.get("risks", []):
                     lines.append(f"- {r}")
@@ -537,7 +554,7 @@ class FutAnalysisRunner:
         lines.append(f"**风格定位**：{name}属期货品种，受供需、季节性、宏观与政策等多因素影响，杠杆交易放大波动。")
         r250 = self._f(trend.data.get("returns", {}).get("近250日涨幅%")) if t_ok else None
         vol = self._f(trend.data.get("volatility")) if t_ok else None
-        concl = f"{name}{'波动较高' if vol and vol>30 else '波动适中'}，{'中期走势偏弱' if r250 and r250<0 else '中期走势平稳'}。期货分析需结合现货供需、仓单与持仓结构，本报告仅基于Tushare行情与仓单数据，仅供技术参考，不构成投资建议。"
+        concl = f"{name}{'波动较高' if vol and vol>30 else '波动适中'}，{'中期走势偏弱' if r250 and r250<0 else '中期走势平稳'}。期货分析需结合现货供需、仓单与持仓结构，以上为基于 T-1 历史数据的描述性分析，不构成投资建议。"
         lines.append(f"**结论**：{concl}")
         return "\n".join(lines)
 

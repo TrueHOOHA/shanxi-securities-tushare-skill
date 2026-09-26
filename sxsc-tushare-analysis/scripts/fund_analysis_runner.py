@@ -33,6 +33,7 @@ from basic_metrics import calc_max_drawdown, calc_returns, calc_sharpe, calc_vol
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
+from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 
 
 def _today() -> str:
@@ -789,6 +790,20 @@ class FundAnalysisRunner:
         "share": "规模变化", "div": "分红", "momentum_quality": "动量质量", "risk": "风险提示",
     }
 
+    # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
+    DIM_DESCRIPTIONS = {
+        "overview": "基金基础档案：代码、类型、成立与上市日期，回答“这是什么基金”。",
+        "nav": "净值走势：单位净值/复权净值的历史涨跌，反映基金长期收益趋势。",
+        "performance": "业绩指标：年化波动率、最大回撤、夏普比率，衡量风险调整后的收益质量。",
+        "peer": "同类对比：与同类型/同主题基金的收益排名，判断在同类中处于什么水平。",
+        "manager": "基金经理：现任管理人的任职年限，判断管理经验与稳定性。",
+        "portfolio": "持仓分析：前十大重仓股及占比，判断集中度与持仓结构。",
+        "share": "规模变化：近4季份额变化，反映资金净申购或赎回动向。",
+        "div": "分红：历史分红次数与累计金额，反映分红策略与持有体验。",
+        "momentum_quality": "动量质量：用风险调整后的动量得分，判断净值涨势是稳健驱动还是少数大波动堆出来的（低质量、持续性存疑）。",
+        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+    }
+
     def _overall_conclusion(self) -> str:
         parts = []
         nav = self.results.get("nav")
@@ -828,6 +843,9 @@ class FundAnalysisRunner:
             res = self.results[dim]
             title = self.DIM_TITLES.get(dim, res.title)
             lines.append(f"## {idx}. {title}")
+            desc = self.DIM_DESCRIPTIONS.get(dim)
+            if desc:
+                lines.append(f"> {desc}")
             if res.conclusion:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
@@ -845,6 +863,9 @@ class FundAnalysisRunner:
             idx += 1
             res = self.results[risk_dim]
             lines.append(f"## {idx}. 风险提示")
+            risk_desc = self.DIM_DESCRIPTIONS.get("risk")
+            if risk_desc:
+                lines.append(f"> {risk_desc}")
             if res.is_ok() and res.data:
                 for r in res.data.get("risks", []):
                     lines.append(f"- {r}")
@@ -980,10 +1001,40 @@ class FundAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，" + ("适合作为配置参考" if not concl_parts else "需结合市场环境判断配置时机") + "，注意分散风险，不构成投资建议。")
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，需结合市场环境与自身风险承受度判断。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
         else:
             lines.append("")
-            lines.append(f"**结论**：{name}当前表现平稳，可作为配置参考，注意分散风险，不构成投资建议。")
+            lines.append(f"**结论**：{name}当前各项指标平稳，未现显著风险信号。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+
+        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
+        try:
+            ret250 = self._f(self._v(nav.data, "returns", "近250日涨幅%")) if nav_ok else None
+            sharpe = self._f(self._v(perf.data, "sharpe")) if perf_ok else None
+            # 基金无 PE/F-Score，估值与质量维跳过
+            composite = calc_composite_score(None, None, ret250, sharpe, None)
+            if composite.get("composite") is not None:
+                lines.append("")
+                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
+                fac = composite.get("factors", {})
+                if fac:
+                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
+
+            positioning = calc_factor_positioning(None, None, ret250)
+            if positioning.get("positioning"):
+                lines.append("")
+                lines.append(f"**因子定位**：{positioning['positioning']}")
+
+            if perf_ok:
+                mdd = self._f(self._v(perf.data, "max_drawdown"))
+                vol = self._f(self._v(perf.data, "volatility"))
+                budget = calc_risk_budget(None, mdd, None, None, vol)
+                if budget.get("suggested_position_pct") is not None:
+                    lines.append("")
+                    lines.append(f"**风险预算**：{budget['risk_level']}风险等级（参考风险承受度约 {budget['suggested_position_pct']}%，基于回撤/波动测算，为风险评估参考，非配置建议）")
+                    for r in budget.get("reasons", []):
+                        lines.append(f"- {r}")
+        except Exception:
+            pass
 
         return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
 
@@ -1059,14 +1110,15 @@ class FundAnalysisRunner:
         elif res.title == "同类对比":
             own = data.get("own") or {}
             if own:
-                rows = [{"指标": k, "数值": str(v)} for k, v in own.items()]
+                own_map = {"ts_code": "基金代码"}
+                rows = [{"指标": own_map.get(k, k), "数值": str(v)} for k, v in own.items()]
                 lines.append(self._md(pd.DataFrame(rows)))
             peers = data.get("peers", [])
             if peers:
                 lines.append("")
                 lines.append("**同类基金前10**：")
                 _clean = [{k: v for k, v in p.items() if not k.startswith("_")} for p in peers]
-                lines.append(self._md(pd.DataFrame(_clean)))
+                lines.append(self._md(pd.DataFrame(_clean).rename(columns={"ts_code": "基金代码"})))
             rank = own.get("近20日%排名%", "N/A")
             lines.append("")
             lines.append(f"**分析评价**：本基金近20日收益排名约 {self._fmt(rank)}% 分位，" + ("处于同类前1/3" if self._f(rank) and self._f(rank) < 33 else "处于同类中游" if self._f(rank) and self._f(rank) < 67 else "处于同类后1/3") + "。")
