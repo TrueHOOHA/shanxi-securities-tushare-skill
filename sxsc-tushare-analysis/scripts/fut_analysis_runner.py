@@ -288,12 +288,12 @@ class FutAnalysisRunner:
             rsi_v = rsi.get("RSI")
             if isinstance(rsi_v, (int, float)):
                 if rsi_v > 70:
-                    risks.append(f"RSI {rsi_v} 超买，短期或有回调")
+                    risks.append(f"RSI {rsi_v} 高于 70（超买）")
                 elif rsi_v < 30:
-                    risks.append(f"RSI {rsi_v} 超卖，短期或有反弹")
+                    risks.append(f"RSI {rsi_v} 低于 30（超卖）")
         _settle_res = self.results.get("settle")
         _mr_v = self._f((_settle_res.data or {}).get("latest_margin_rate")) if _settle_res and _settle_res.is_ok() else None
-        risks.append("期货为保证金交易" + (f"（最新保证金率 {_mr_v*100:.0f}%，名义杠杆约 {1/_mr_v:.1f} 倍）" if _mr_v and _mr_v > 0 else "，杠杆放大盈亏") + "，需严格执行仓位与止损管理")
+        risks.append("期货为保证金交易" + (f"（最新保证金率 {_mr_v*100:.0f}%，名义杠杆约 {1/_mr_v:.1f} 倍）" if _mr_v and _mr_v > 0 else "，盈亏随杠杆同步放大") + "，交易制度上实行每日无负债结算")
         risks.append("主力连续合约有换月跳空，技术指标可能失真")
         # 数据缺失
         notes = []
@@ -466,7 +466,7 @@ class FutAnalysisRunner:
             lines.append("")
             lines.append(self._md(pd.DataFrame(tech)))
             lines.append("")
-            lines.append(f"**分析评价**：主力连续合约拼接各时期主力，注意换月跳空对技术指标的影响。RSI超买(>70)/超卖(<30)为短期信号，需结合趋势判断。")
+            lines.append(f"**分析评价**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI超买(>70)/超卖(<30)为短期状态指标。")
         elif res.title == "持仓分析":
             if res.status == ResultStatus.SUCCESS and data.get("holding_records"):
                 lines.append(self._md(pd.DataFrame(data["holding_records"]).head(10)))
@@ -477,7 +477,7 @@ class FutAnalysisRunner:
                 if oi:
                     lines.append(self._md(pd.DataFrame([{"trade_date": k, "持仓量(手)": int(v)} for k, v in oi.items()])))
                     lines.append("")
-                lines.append("**分析评价**：持仓量(oi)变化反映资金进出，与价格同向为趋势健康，背离需警惕。")
+                lines.append("**分析评价**：持仓量(oi)变化反映资金进出，与价格同向为趋势确认信号，背离时为常见的资金分歧信号。")
         elif res.title == "主力合约":
             ch = data.get("changes", [])
             if ch:

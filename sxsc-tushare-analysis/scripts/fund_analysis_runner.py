@@ -680,7 +680,7 @@ class FundAnalysisRunner:
                 if first and last and first > 0:
                     chg = (last / first - 1) * 100
                     if chg < -20:
-                        risks.append(f"近4季份额缩水 {abs(chg):.2f}%，需关注赎回压力")
+                        risks.append(f"近4季份额缩水 {abs(chg):.2f}%，呈持续净赎回特征")
 
         if not risks:
             risks.append("未发现显著风险信号（基于已有维度）")
@@ -997,11 +997,11 @@ class FundAnalysisRunner:
             if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
                 chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
                 if chg < -20:
-                    concl_parts.append(f"份额缩水 {abs(chg):.1f}%需关注赎回压力")
+                    concl_parts.append(f"份额缩水 {abs(chg):.1f}%（持续净赎回）")
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，需结合市场环境与自身风险承受度判断。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，上述特征的历史表现随市场环境变化。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
         else:
             lines.append("")
             lines.append(f"**结论**：{name}当前各项指标平稳，未现显著风险信号。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
@@ -1082,11 +1082,11 @@ class FundAnalysisRunner:
                 if ec.get("premium_discount_pct") is not None:
                     _pd_pct = ec["premium_discount_pct"]
                     _pd_txt = "溢价" if _pd_pct > 0 else "折价" if _pd_pct < 0 else "平价"
-                    lines.append(f"\n**ETF 折溢价**：{_pd_pct:+.2f}%（{_pd_txt}，收盘价相对单位净值；|折溢价|>1% 时注意交易成本与价格偏离风险）")
+                    lines.append(f"\n**ETF 折溢价**：{_pd_pct:+.2f}%（{_pd_txt}，收盘价相对单位净值；折溢价即二级市场价格相对净值的偏离幅度）")
                 if ec.get("tracking_error_ann_pct") is not None:
                     _te = ec["tracking_error_ann_pct"]
                     lines.append(f"**跟踪误差**：年化 {_te:.2f}%（基准 {ec.get('benchmark_code')}）；宽基 ETF 年化跟踪误差通常 <1%，偏高时检查费用、抽样复制或现金拖累")
-            lines.append(f"**分析评价**：最新净值 {self._fmt(data.get('latest_nav'))}，近20日 {self._fmt(returns.get('近20日涨幅%'))}%，近250日 {self._fmt(returns.get('近250日涨幅%'))}%。净值走势反映基金长期趋势，需结合波动率和回撤综合判断。")
+            lines.append(f"**分析评价**：最新净值 {self._fmt(data.get('latest_nav'))}，近20日 {self._fmt(returns.get('近20日涨幅%'))}%，近250日 {self._fmt(returns.get('近250日涨幅%'))}%。净值走势反映基金长期趋势，波动率与最大回撤刻画其风险特征。")
 
         elif res.title == "业绩指标":
             table = {

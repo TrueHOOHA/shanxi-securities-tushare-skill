@@ -99,7 +99,7 @@ def calc_price_volume_pattern(close, vol):
 
     价(近5日涨跌) × 量(量比放缩)：
       价升+量增 = 健康上涨（主力参与，趋势可信）
-      价升+量缩 = 量价背离（上涨乏力，警惕见顶）
+      价升+量缩 = 量价背离（上涨动能减弱的常见形态）
       价跌+量增 = 恐慌抛售（加速赶底或利空发酵）
       价跌+量缩 = 缩量回调（抛压衰竭，可能见底）
 
@@ -121,7 +121,7 @@ def calc_price_volume_pattern(close, vol):
     if price_dir == "升" and vol_dir == "增":
         pattern, meaning = "价升量增", "健康上涨（主力参与，趋势可信）"
     elif price_dir == "升" and vol_dir == "缩":
-        pattern, meaning = "价升量缩", "量价背离（上涨乏力，警惕见顶）"
+        pattern, meaning = "价升量缩", "量价背离（上涨动能减弱的常见形态）"
     elif price_dir == "跌" and vol_dir == "增":
         pattern, meaning = "价跌量增", "恐慌抛售（加速赶底或利空发酵）"
     elif price_dir == "跌" and vol_dir == "缩":
@@ -385,7 +385,7 @@ def calc_chip_price_cross(df_holders, df_price):
 
     户数下降+股价上涨 = 筹码锁定上涨（健康上涨，主力锁仓）
     户数下降+股价下跌 = 主力被套（可能阶段见底）
-    户数上升+股价上涨 = 散户接盘（警惕见顶）
+    户数上升+股价上涨 = 散户接盘特征
     户数上升+股价下跌 = 筹码分散下跌（抛压加重）
 
     df_holders: stk_holdernumber 结果（含 end_date, holder_num）
@@ -413,7 +413,7 @@ def calc_chip_price_cross(df_holders, df_price):
     elif holder_dir == "降" and price_dir == "跌":
         cross, health = "户数降+股价跌", "主力被套（可能阶段见底）"
     elif holder_dir == "升" and price_dir == "涨":
-        cross, health = "户数升+股价涨", "散户接盘（警惕见顶）"
+        cross, health = "户数升+股价涨", "散户接盘特征"
     elif holder_dir == "升" and price_dir == "跌":
         cross, health = "户数升+股价跌", "筹码分散下跌（抛压加重）"
     else:

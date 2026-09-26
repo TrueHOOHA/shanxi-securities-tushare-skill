@@ -151,9 +151,9 @@ def calc_holder_concentration(df_holders):
     total_chg = round((df["holder_num"].iloc[-1] / df["holder_num"].iloc[0] - 1) * 100, 1)
 
     if latest_chg < -3:
-        signal = "筹码趋于集中（户数下降，需结合量价验证）"
+        signal = "筹码趋于集中（户数下降）"
     elif latest_chg > 3:
-        signal = "筹码趋于分散（户数上升，需结合量价验证）"
+        signal = "筹码趋于分散（户数上升）"
     elif total_chg < -15:
         signal = "中期筹码趋于集中（户数显著下降）"
     elif total_chg > 15:

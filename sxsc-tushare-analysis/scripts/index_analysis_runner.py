@@ -800,7 +800,7 @@ class IndexAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，需结合市场环境与自身风险承受度判断。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，上述特征的历史表现随市场环境变化。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
         else:
             lines.append("")
             lines.append(f"**结论**：{name}当前各项指标相对中性。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
@@ -1063,7 +1063,7 @@ class IndexAnalysisRunner:
             if pe_hist > 80:
                 parts.append(f"PE历史分位 {pe_hist}%，估值偏高。")
             elif pe_hist > 70:
-                parts.append(f"PE历史分位 {pe_hist}%，估值中高（需盈利增速消化估值）。")
+                parts.append(f"PE历史分位 {pe_hist}%，估值中高（进一步抬升依赖盈利增速）。")
             elif pe_hist < 20:
                 parts.append(f"PE历史分位 {pe_hist}%，处于历史低位。")
                 if pe is not None and pe > 30:
@@ -1079,7 +1079,7 @@ class IndexAnalysisRunner:
                 parts.append(f"PB历史分位 {pb_hist}%，偏低。")
             else:
                 parts.append(f"PB历史分位 {pb_hist}%。")
-        parts.append("指数估值需结合成分股盈利增速与行业景气度判断。")
+        parts.append("指数估值水位与成分股盈利增速、行业景气度相关。")
         return "**分析评价**：" + "".join(parts)
 
     def _margin_eval(self, data):
@@ -1090,7 +1090,7 @@ class IndexAnalysisRunner:
             parts.append(f"两市融资余额合计 {total_rzye:.0f}亿，")
         if avg_chg is not None:
             if avg_chg > 5:
-                parts.append(f"近一年上升 {avg_chg}%，杠杆资金快速入场，市场风险偏好升温，需警惕追高风险。")
+                parts.append(f"近一年上升 {avg_chg}%，杠杆资金快速入场，市场风险偏好升温。")
             elif avg_chg < -5:
                 parts.append(f"近一年下降 {abs(avg_chg)}%，杠杆资金持续撤离，市场风险偏好降温，反映资金面偏谨慎。")
             else:

@@ -665,7 +665,7 @@ class StockAnalysisRunner:
             _std = "标准无保留" in str(audit_info["audit_result"])
             conclusion += (
                 f" 最新审计意见：{audit_info['audit_result']}（{audit_info.get('end_date')} 年报）"
-                + ("" if _std else "——非标准无保留意见，需重点核查") + "。"
+                + ("" if _std else "——非标准无保留意见（区别于标准无保留意见）") + "。"
             )
         if next_disclosure:
             conclusion += f" 下一期财报预定披露日 {next_disclosure.get('pre_date')}（报告期 {next_disclosure.get('end_date')}）。"
@@ -845,9 +845,9 @@ class StockAnalysisRunner:
         latest_chg = round(changes.iloc[-1], 1) if len(changes) > 0 else 0
 
         if latest_chg < -3:
-            signal = "筹码趋于集中（户数下降，需结合量价验证）"
+            signal = "筹码趋于集中（户数下降）"
         elif latest_chg > 3:
-            signal = "筹码趋于分散（户数上升，需结合量价验证）"
+            signal = "筹码趋于分散（户数上升）"
         elif total_chg < -15:
             signal = "中期筹码趋于集中"
         elif total_chg > 15:
@@ -965,7 +965,7 @@ class StockAnalysisRunner:
             conclusion += f"；近半年大股东增持 {trade_summary['buy_records']} 次，减持 {trade_summary['sell_records']} 次"
         if pledge_info and pledge_info.get("pledge_ratio") is not None:
             _pr = pledge_info["pledge_ratio"]
-            conclusion += f"；股权质押比例 {_pr}%（{int(pledge_info.get('pledge_count') or 0)} 笔）" + ("，质押比例偏高需关注" if _pr > 30 else "")
+            conclusion += f"；股权质押比例 {_pr}%（{int(pledge_info.get('pledge_count') or 0)} 笔）" + ("，质押比例偏高" if _pr > 30 else "")
         if rewards_info:
             conclusion += f"；现任高管 {rewards_info['count']} 人（{rewards_info['end_date']} 报告期合计薪酬 {self._fmt(rewards_info['total_reward_wan'])} 万元）"
 
@@ -985,7 +985,7 @@ class StockAnalysisRunner:
             "float_records": df.to_dict("records"),
             "total_float_share": total_float,
         }
-        conclusion = f"未来 3 个月有 {len(df)} 笔解禁，合计 {total_float} 股（需结合总股本计算占比）。"
+        conclusion = f"未来 3 个月有 {len(df)} 笔解禁，合计 {total_float} 股（占比以总股本为分母）。"
         return DimensionResult.success("解禁压力", conclusion=conclusion, data=data)
 
 
@@ -1304,9 +1304,9 @@ class StockAnalysisRunner:
             if isinstance(mdd, (int, float)) and mdd < -30:
                 risks.append(f"近一年最大回撤 {mdd}% 较深")
             if isinstance(rsi.get("RSI"), (int, float)) and rsi["RSI"] > 70:
-                risks.append("RSI 超买，短期或有回调压力")
+                risks.append("RSI 高于 70（超买）")
             if isinstance(rsi.get("RSI"), (int, float)) and rsi["RSI"] < 30:
-                risks.append("RSI 低于 30（超卖），短期波动可能放大，需防趋势惯性下跌")
+                risks.append("RSI 低于 30（超卖），历史上该状态常伴随短期波动放大")
 
         valuation = self.results.get("valuation")
         if valuation and valuation.is_ok() and valuation.data:
@@ -1377,7 +1377,7 @@ class StockAnalysisRunner:
             if market.data.get("alert_records"):
                 risks.append(f"该股被交易所重点提示 {len(market.data['alert_records'])} 次")
             if any(str(r.get("suspend_type")) == "S" for r in market.data.get("suspend_records", [])):
-                risks.append(f"近60日有停牌记录（{len(market.data['suspend_records'])} 条停复牌事件），注意流动性风险")
+                risks.append(f"近60日有停牌记录（{len(market.data['suspend_records'])} 条停复牌事件），该期间流动性受限")
 
         # VaR/CVaR
         trend = self.results.get("trend")
@@ -1486,7 +1486,7 @@ class StockAnalysisRunner:
         "moneyflow": "资金动向：主力/超大单/北向资金净流入，判断大资金在买还是卖。",
         "shareholder": "股东筹码：户数变化、前十大持股与大股东增减持，判断筹码集中度与机构动向。",
         "float": "解禁压力：未来3个月限售股释放计划，判断潜在的供给冲击。",
-        "margin": "两融杠杆：融资融券余额变化，判断市场杠杆情绪与追高/撤离信号。",
+        "margin": "两融杠杆：融资融券余额变化，反映市场杠杆情绪与杠杆资金进出方向。",
         "market_activity": "市场异动：涨跌停、龙虎榜与机构席位，捕捉短期资金的极端关注。",
         "macro": "宏观环境：大盘走势、CPI/PPI、LPR 与 GDP，判断整体顺风或逆风。",
         "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
@@ -1803,7 +1803,7 @@ class StockAnalysisRunner:
             if pe_hist is not None and pe_hist < 30:
                 concl_parts.append("估值处于历史低位，具备一定安全边际")
             elif pe_hist is not None and pe_hist > 70:
-                concl_parts.append("估值处于历史高位，需警惕回调风险")
+                concl_parts.append("估值处于历史高位")
             if ret250 is not None and ret250 < -10:
                 concl_parts.append("近期走势偏弱")
             elif ret250 is not None and ret250 > 20:
@@ -1811,7 +1811,7 @@ class StockAnalysisRunner:
         if fin_ok:
             debt = self._f(self._v(financial.data, "latest", "debt_to_assets"))
             if debt is not None and debt > 80:
-                concl_parts.append("资产负债率偏高需关注")
+                concl_parts.append("资产负债率偏高")
             fc = financial.data.get("forecast") or {}
             if fc and fc.get("type") in ("预增", "略增") and (self._forecast_days(fc) or 999) <= 150:
                 concl_parts.append("业绩预告正向")
@@ -1861,8 +1861,8 @@ class StockAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            value_trait = "当前呈现低估值/高股息特征，符合价值型资产的一般画像" if tags and ("低估值" in tags or "高股息" in tags) else "暂无明显的价值或成长极端特征，需结合行业景气度与业绩趋势进一步跟踪"
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，{value_trait}。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            value_trait = "当前呈现低估值/高股息特征，符合价值型资产的一般画像" if tags and ("低估值" in tags or "高股息" in tags) else "暂无明显的价值或成长极端特征"
+            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，{value_trait}，其后续表现取决于行业景气度与业绩趋势。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
 
         return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
 
@@ -2131,7 +2131,7 @@ class StockAnalysisRunner:
             pl = data.get("pledge")
             if pl:
                 _pl_high = isinstance(pl.get("pledge_ratio"), (int, float)) and pl.get("pledge_ratio") > 30
-                lines.append(f"\n**股权质押（{pl.get('end_date', 'N/A')}）**：质押 {self._fmt(pl.get('pledge_count'), digits=0)} 笔，质押比例 {self._fmt(pl.get('pledge_ratio'))}%" + ("（偏高，需关注）" if _pl_high else ""))
+                lines.append(f"\n**股权质押（{pl.get('end_date', 'N/A')}）**：质押 {self._fmt(pl.get('pledge_count'), digits=0)} 笔，质押比例 {self._fmt(pl.get('pledge_ratio'))}%" + ("（偏高）" if _pl_high else ""))
             mr = data.get("manager_rewards")
             if mr:
                 _hold = f"，合计持股 {self._fmt(mr.get('total_hold_vol'), digits=0)} 股" if mr.get("total_hold_vol") is not None else "（持股数据未披露）"
@@ -2258,7 +2258,7 @@ class StockAnalysisRunner:
         except Exception:
             pass
 
-        parts.append("纵向历史位与横向板块位反映不同口径，二者背离通常源于板块整体估值水位变化，需结合业绩增速与行业景气度综合判断，单一口径不构成买卖依据。")
+        parts.append("纵向历史位与横向板块位反映不同口径，二者背离通常源于板块整体估值水位变化。")
         return "**分析评价**：" + "".join(parts)
 
     def _financial_eval(self, data):
@@ -2309,29 +2309,29 @@ class StockAnalysisRunner:
         parts = []
         if "中期筹码趋于集中" in signal:
             qoq = self._f(data.get("latest_qoq")) or 0
-            parts.append(f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，筹码趋于集中；最新一期环比 {self._fmt(data.get('latest_qoq'))}%，{'继续下降' if qoq < 0 else '有所回升'}。需结合量价验证是否为有效吸筹。")
+            parts.append(f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，筹码趋于集中；最新一期环比 {self._fmt(data.get('latest_qoq'))}%，{'继续下降' if qoq < 0 else '有所回升'}。该形态与历史上吸筹情形的特征存在重合，量价走势为常用交叉验证维度。")
         elif "中期筹码趋于分散" in signal:
             _trend_res = self.results.get("trend")
             _chg60 = self._f(self._v(_trend_res.data, "returns", "近60日涨幅%")) if _trend_res and _trend_res.is_ok() else None
             _base = f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，筹码趋于分散；最新一期环比 {self._fmt(data.get('latest_qoq'))}%"
-            parts.append(_base + ("，且股价明显上涨，需警惕高位派发风险。" if _chg60 is not None and _chg60 > 10 else "。需结合量价验证。"))
+            parts.append(_base + ("，且发生在股价上涨之后，与历史上高位派发情形的特征相符。" if _chg60 is not None and _chg60 > 10 else "，量价走势为常用交叉验证维度。"))
         elif "集中" in signal:
-            parts.append("股东户数减少，筹码趋于集中，通常与人均持股上升相关，但需结合股价位置与成交量判断是否为有效吸筹。")
+            parts.append("股东户数减少，筹码趋于集中，通常与人均持股上升相关；是否对应吸筹情形，与股价位置和成交量相关。")
         elif "分散" in signal:
             _trend_res = self.results.get("trend")
             _chg60 = self._f(self._v(_trend_res.data, "returns", "近60日涨幅%")) if _trend_res and _trend_res.is_ok() else None
             if _chg60 is not None and _chg60 < -10:
-                parts.append("股东户数增加、筹码趋于分散，且股价近60日已明显走弱，更接近散户接盘/筹码扩散特征，而非高位派发；需警惕趋势延续风险。")
+                parts.append("股东户数增加、筹码趋于分散，且股价近60日已明显走弱，更接近散户接盘/筹码扩散特征，而非高位派发；该形态历史上多伴随趋势延续。")
             elif _chg60 is not None and _chg60 > 10:
-                parts.append("股东户数增加、筹码趋于分散，且发生在股价上涨之后，需警惕高位派发风险。")
+                parts.append("股东户数增加、筹码趋于分散，且发生在股价上涨之后，与历史上高位派发情形的特征相符。")
             else:
-                parts.append("股东户数增加，筹码趋于分散，通常与人均持股下降相关，需结合量价验证。")
+                parts.append("股东户数增加，筹码趋于分散，通常与人均持股下降相关；量价走势为常用交叉验证维度。")
         else:
             parts.append("股东户数变化温和，筹码结构相对稳定。")
         if trade:
             buy = trade.get("buy_records", 0) or 0
             sell = trade.get("sell_records", 0) or 0
-            parts.append(f"大股东近半年增持 {buy} 次、减持 {sell} 次，方向{'偏积极' if buy > sell else '偏谨慎' if sell > buy else '中性'}。")
+            parts.append(f"大股东近半年增持 {buy} 次、减持 {sell} 次，增减持净方向{'为正' if buy > sell else '为负' if sell > buy else '持平'}。")
         return "**分析评价**：" + "".join(parts)
 
     def _margin_eval(self, data):
@@ -2342,7 +2342,7 @@ class StockAnalysisRunner:
             parts.append(f"融资余额近5日变化 {c}%，{'杠杆情绪升温' if c > 5 else '杠杆资金撤离' if c < -5 else '杠杆情绪平稳'}。")
         except Exception:
             parts.append("融资余额数据不足。")
-        parts.append("两融余额变化反映风险偏好，快速上升需警惕追高风险。")
+        parts.append("两融余额变化反映杠杆资金的风险偏好，快速上升对应杠杆资金加速入场的情形。")
         return "**分析评价**：" + "".join(parts)
 
     def _macro_eval(self, data):
