@@ -101,11 +101,11 @@ description: >
 | 7 | 两融/杠杆情绪 | `margin_detail`、`margin_secs`(两融标的名单) | 融资余额及变化率、融券余额、近5日融资余额变化；是否两融标的（明细为空时用于区分"非两融标的"与"数据缺失"） |
 | 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst`、`stk_shock`/`stk_high_shock`(异常波动)、`stk_alert`(重点提示)、`stk_limit`(涨跌停价格)、`hm_detail`/`hm_list`(游资)、`suspend_d`(停复牌) | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖；近一年异常波动/严重异常波动记录、交易所重点提示、最近交易日涨跌停价格、近120日游资上榜明细（`net_amount` 单位：元）、近60日停复牌记录（`suspend_type`: S-停牌 R-复牌） |
 | 9 | 解禁压力 | **`share_float`** | 未来 3 个月即将解禁股份数量及占比 |
-| 10 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr`、`cn_gdp`、`cn_m`(货币供应)、`shibor`、`daily_info`+`sz_daily_info`(市场成交统计) | 大盘近期走势、CPI/PPI 走势与方向、LPR 利率水平、GDP 同比、M1/M2 同比与剪刀差、Shibor 3M、A股总成交额与沪市平均PE（`daily_info` 用 SH_A 板块、`sz_daily_info` 用"股票"板块；`daily_info.amount` 单位：亿元，`sz_daily_info.amount` 单位：元、换算亿元需 /1e8） |
-| 11 | 风险提示 | 汇总以上维度 | 综合风险分级：高/中/低，列出具体风险信号 |
-| 12 | 动量质量（因子化） | `daily`、`adj_factor` | 高质量动量(r_60-3000σ²)、振幅切割动量A/B(低/高振幅日ret加总) |
-| 13 | 微观结构（因子化） | `daily`、`adj_factor` | 上下影线因子(蜡烛/威廉版5日标准化)、理想振幅V(λ)=V_high-V_low |
-| 14 | 行为金融（因子化） | `daily`、`daily_basic`、`index_daily`(沪深300) | 凸显度/惊恐度STR(指数近似截面均值)、处置效应CGO(换手率衰减加权参考价) |
+| 10 | 动量质量（因子化） | `daily`、`adj_factor` | 高质量动量(r_60-3000σ²)、振幅切割动量A/B(低/高振幅日ret加总) |
+| 11 | 微观结构（因子化） | `daily`、`adj_factor` | 上下影线因子(蜡烛/威廉版5日标准化)、理想振幅V(λ)=V_high-V_low |
+| 12 | 行为金融（因子化） | `daily`、`daily_basic`、`index_daily`(沪深300) | 凸显度/惊恐度STR(指数近似截面均值)、处置效应CGO(换手率衰减加权参考价) |
+| 13 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr`、`cn_gdp`、`cn_m`(货币供应)、`shibor`、`daily_info`+`sz_daily_info`(市场成交统计) | 大盘近期走势、CPI/PPI 走势与方向、LPR 利率水平、GDP 同比、M1/M2 同比与剪刀差、Shibor 3M、A股总成交额与沪市平均PE（`daily_info` 用 SH_A 板块、`sz_daily_info` 用"股票"板块；`daily_info.amount` 单位：亿元，`sz_daily_info.amount` 单位：元、换算亿元需 /1e8） |
+| 14 | 风险提示 | 汇总以上维度 | 综合风险分级：高/中/低，列出具体风险信号 |
 
 > **因子化洞察**：动量质量/微观结构/行为金融三个因子维度由 `scripts/factor_signals.py` 实现（QuantsPlaybook 研报因子，纯时序单标的计算——不依赖全市场截面，截面 rank 未做、行业/市值中性化未做，因子为原始值非纯净因子；数据口径假设见该模块 docstring）。因子洞察通过 `DimensionResult.insights` 字段承载，报告自动渲染「**因子洞察**」列表。
 

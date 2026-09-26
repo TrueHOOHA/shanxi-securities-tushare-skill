@@ -1195,13 +1195,13 @@ class FundAnalysisRunner:
             rows = []
             qm = data.get("quantitative_momentum", {})
             if qm:
-                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"))})
-                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"))})
-                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"))})
+                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"), digits=4)})
+                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"), digits=4)})
+                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"), digits=4)})
             am = data.get("amplitude_momentum", {})
             if am:
-                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
-                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"), digits=4)})
+                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"), digits=4)})
             if data.get("source"):
                 rows.append({"指标": "数据源", "数值": data["source"]})
             if rows:

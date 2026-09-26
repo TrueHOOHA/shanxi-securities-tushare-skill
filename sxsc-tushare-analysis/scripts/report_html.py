@@ -20,7 +20,15 @@ ECHARTS_CDN = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
 _CSS = """
 :root{--ink:#1a1a1a;--accent:#2c6fbb;--muted:#5f656d;--faint:#9aa0a8;--border:#e6e8eb}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',system-ui,sans-serif;max-width:1000px;margin:0 auto;padding:44px 30px 80px;color:var(--ink);line-height:1.75;background:#fff;-webkit-font-smoothing:antialiased}
+body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',system-ui,sans-serif;max-width:none;margin:0 auto;padding:0;color:var(--ink);line-height:1.75;background:#fff;-webkit-font-smoothing:antialiased}
+.layout{display:flex;gap:28px;max-width:1240px;margin:0 auto;padding:44px 24px 80px;align-items:flex-start}
+.content{flex:1;min-width:0}
+.toc{position:sticky;top:20px;flex:0 0 190px;max-height:calc(100vh - 40px);overflow:auto;font-size:12.5px;background:#fafbfc;border:1px solid var(--border);border-radius:10px;padding:12px 10px}
+.toc-title{font-size:12px;color:var(--faint);font-weight:600;margin-bottom:8px;letter-spacing:.05em}
+.toc a{display:flex;gap:8px;color:var(--muted);text-decoration:none;padding:4px 6px;border-radius:6px;line-height:1.4}
+.toc a:hover{color:var(--accent);background:#eef4fb}
+.toc a .n{color:var(--faint);font-size:11px;min-width:16px;text-align:right}
+@media (max-width:920px){.layout{display:block;padding:44px 20px 80px}.toc{display:none}}
 h1{font-size:24px;font-weight:700;letter-spacing:.005em;margin-bottom:6px}
 blockquote{font-size:13px;color:var(--muted);margin:0 0 30px}
 h2{font-size:17px;font-weight:600;display:flex;align-items:baseline;gap:10px;margin:38px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
@@ -401,14 +409,17 @@ def render_html_report(md_text: str, results) -> str:
     kpi = _kpi_html(_kpi_items(results))
     if kpi:
         parts.append(kpi)
+    toc = []
     for h2_md, body in sections:
         heading = h2_md[3:]  # 去掉 '## '
         m = re.match(r"^(\d+)\.\s*(.*)$", heading)
         if m:
             head_html = f'<span class="num">{m.group(1)}</span>{_inline(m.group(2))}'
+            toc.append((m.group(1), _inline(m.group(2))))
+            parts.append(f"<h2 id='sec-{m.group(1)}'>{head_html}</h2>")
         else:
             head_html = _inline(heading)
-        parts.append(f"<h2>{head_html}</h2>")
+            parts.append(f"<h2>{head_html}</h2>")
         parts.append(_chart_divs(heading))
         if any(line.strip() for line in body):
             parts.append(md_to_html("\n".join(body)))
@@ -422,13 +433,19 @@ def render_html_report(md_text: str, results) -> str:
     chart_js = json.dumps(
         {f"chart-{i}": all_opts[i] for i in range(len(all_opts))}, ensure_ascii=False
     )
+    toc_html = ""
+    if toc:
+        toc_html = "<nav class='toc'><div class='toc-title'>目录</div>" + "".join(
+            f"<a href='#sec-{n}'><span class='n'>{n}</span>{t}</a>" for n, t in toc) + "</nav>"
     return (
         "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'>"
         f"<title>{_page_title(md_text)}</title>"
         f"<script src='{ECHARTS_CDN}'></script>"
         f"<style>{_CSS}</style></head><body>"
+        + "<div class='layout'>" + toc_html + "<main class='content'>"
         + "\n".join(parts)
         + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）</div>"
+        + "</main></div>"
         + f"<script>const CHARTS = {chart_js};{_INIT_JS}</script>"
         + "</body></html>"
     )

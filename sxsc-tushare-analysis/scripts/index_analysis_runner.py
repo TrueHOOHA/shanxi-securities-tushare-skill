@@ -424,9 +424,9 @@ class IndexAnalysisRunner:
         conclusion = f"动量质量因子分析（数据源：{_src}）。"
         insights = []
         if qm:
-            insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
+            insights.append(f"高质量动量得分 {qm['momentum']}（60日收益 {qm['raw_return'] * 100:.2f}%、日波动 {qm['sigma'] * 100:.2f}%；得分 = 收益 − 3000×方差，越大动量越强且质量越高）")
         if am:
-            insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+            insights.append(f"振幅切割动量：A={am['a_factor']}（低振幅日收益合计，>0 动量正向）、B={am['b_factor']}（高振幅日收益合计，呈反转效应）")
         elif not has_ohlc:
             insights.append("行情缺 high/low 列，振幅切割动量不适用")
         if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
@@ -1007,13 +1007,13 @@ class IndexAnalysisRunner:
             rows = []
             qm = data.get("quantitative_momentum", {})
             if qm:
-                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"))})
-                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"))})
-                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"))})
+                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"), digits=4)})
+                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"), digits=4)})
+                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"), digits=4)})
             am = data.get("amplitude_momentum", {})
             if am:
-                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
-                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"), digits=4)})
+                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"), digits=4)})
             if data.get("source"):
                 rows.append({"指标": "数据源", "数值": data["source"]})
             if rows:

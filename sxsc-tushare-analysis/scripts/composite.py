@@ -351,10 +351,11 @@ def calc_risk_budget(var95=None, max_drawdown=None, beta=None, amihud=None, vola
 
     if amihud is not None:
         ai = float(amihud)
+        _ai_txt = f"{ai:.6f}".rstrip("0").rstrip(".")
         if ai > 0.1:
-            base = min(base, base - 10); reasons.append(f"Amihud {ai}（流动性差，进出成本高）")
+            base = min(base, base - 10); reasons.append(f"Amihud {_ai_txt}（流动性差，进出成本高）")
         else:
-            reasons.append(f"Amihud {ai}（流动性好）")
+            reasons.append(f"Amihud {_ai_txt}（流动性好）")
 
     if beta is not None:
         b = float(beta)

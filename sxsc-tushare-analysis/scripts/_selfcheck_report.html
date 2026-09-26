@@ -1,0 +1,60 @@
+<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'><title>测试标的 全景研究报告</title><script src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js'></script><style>
+:root{--ink:#1a1a1a;--accent:#2c6fbb;--muted:#5f656d;--faint:#9aa0a8;--border:#e6e8eb}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',system-ui,sans-serif;max-width:none;margin:0 auto;padding:0;color:var(--ink);line-height:1.75;background:#fff;-webkit-font-smoothing:antialiased}
+.layout{display:flex;gap:28px;max-width:1240px;margin:0 auto;padding:44px 24px 80px;align-items:flex-start}
+.content{flex:1;min-width:0}
+.toc{position:sticky;top:20px;flex:0 0 190px;max-height:calc(100vh - 40px);overflow:auto;font-size:12.5px;background:#fafbfc;border:1px solid var(--border);border-radius:10px;padding:12px 10px}
+.toc-title{font-size:12px;color:var(--faint);font-weight:600;margin-bottom:8px;letter-spacing:.05em}
+.toc a{display:flex;gap:8px;color:var(--muted);text-decoration:none;padding:4px 6px;border-radius:6px;line-height:1.4}
+.toc a:hover{color:var(--accent);background:#eef4fb}
+.toc a .n{color:var(--faint);font-size:11px;min-width:16px;text-align:right}
+@media (max-width:920px){.layout{display:block;padding:44px 20px 80px}.toc{display:none}}
+h1{font-size:24px;font-weight:700;letter-spacing:.005em;margin-bottom:6px}
+blockquote{font-size:13px;color:var(--muted);margin:0 0 30px}
+h2{font-size:17px;font-weight:600;display:flex;align-items:baseline;gap:10px;margin:38px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+h2 .num{color:var(--faint);font-weight:600;font-size:12.5px}
+h3{font-size:13.5px;font-weight:600;color:#333;margin:20px 0 8px}
+p{font-size:13.5px;margin-bottom:10px}
+p em{color:var(--muted);font-size:12px}
+.table-wrap{overflow-x:auto;margin:14px 0 8px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+thead th{padding:8px 12px;font-weight:600;color:#333;text-align:left;border-bottom:1.5px solid #333;white-space:nowrap;letter-spacing:.02em}
+tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+td.r{text-align:right;white-space:nowrap}
+th.r{text-align:right}
+tbody td:first-child{white-space:nowrap;font-weight:500;padding-right:22px}
+tbody tr:hover{background:#f5f7fa}
+tbody tr:last-child td{border-bottom:none}
+code{font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:12.5px;background:#f4f5f6;padding:1px 6px;border-radius:4px}
+ul{margin:8px 0 14px;padding-left:20px}
+ul li{font-size:13.5px;margin:3px 0}
+hr{border:none;border-top:1px solid var(--border);margin:30px 0 10px}
+.chart{width:100%;height:430px;margin:14px 0 4px}
+.kpi-bar{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 6px}
+.kpi{background:#f7f8f9;border:1px solid var(--border);border-radius:12px;padding:10px 18px;min-width:96px}
+.kpi-label{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.kpi-value{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.footer{color:var(--faint);font-size:12px;margin-top:44px;padding-top:14px;border-top:1px solid var(--border);text-align:center}
+</style></head><body><div class='layout'><nav class='toc'><div class='toc-title'>目录</div><a href='#sec-1'><span class='n'>1</span>行情趋势</a></nav><main class='content'><h1>测试标的 全景研究报告</h1>
+<p></p>
+<blockquote>数据日期：20260904（Tushare 数据为 T-1 日）</blockquote>
+<div class="kpi-bar"><div class="kpi"><div class="kpi-label">最新价</div><div class="kpi-value">10.90</div></div></div>
+<h2 id='sec-1'><span class="num">1</span>行情趋势</h2>
+<div id="chart-0" class="chart"></div>
+<p>近20日涨幅 <strong>5.2%</strong>，年化波动 <code>12.3%</code>。</p>
+<p></p>
+<div class='table-wrap'><table><thead><tr><th>指标</th><th class='r'>数值</th></tr></thead><tbody><tr><td>近20日涨幅</td><td class='r'>5.2%</td></tr><tr><td>年化波动</td><td class='r'>12.3%</td></tr></tbody></table></div>
+<p></p>
+<ul><li>风险信号 1</li><li>风险信号 2</li></ul>
+<p></p>
+<hr>
+<p><em>本报告由AI自动生成</em></p><div class='footer'>报告生成于 2026-09-26 23:34 · 数据来自山西证券 Tushare（T-1）</div></main></div><script>const CHARTS = {"chart-0": {"title": {"text": "日线行情（样例）", "left": 0, "textStyle": {"color": "#1a1a1a", "fontSize": 13, "fontWeight": 600}}, "animationDuration": 500, "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross", "crossStyle": {"color": "#bbb"}}, "backgroundColor": "rgba(26,26,26,.92)", "borderColor": "transparent", "padding": [8, 12], "textStyle": {"color": "#fff", "fontSize": 12}}, "axisPointer": {"link": [{"xAxisIndex": "all"}]}, "grid": [{"left": 56, "right": 16, "top": 36, "height": "52%"}, {"left": 56, "right": 16, "top": "70%", "height": "16%"}], "xAxis": [{"type": "category", "data": ["20260901", "20260902", "20260903"], "gridIndex": 0, "axisLabel": {"show": false}, "axisLine": {"show": false}, "axisTick": {"show": false}}, {"type": "category", "data": ["20260901", "20260902", "20260903"], "gridIndex": 1, "axisLabel": {"color": "#9aa0a8", "fontSize": 9, "fontWeight": 500}, "axisLine": {"lineStyle": {"color": "#e6e8eb"}}, "axisTick": {"show": false}}], "yAxis": [{"type": "value", "gridIndex": 0, "scale": true, "axisLabel": {"color": "#9aa0a8", "fontSize": 9.5, "fontWeight": 500}, "axisLine": {"show": false}, "axisTick": {"show": false}, "splitLine": {"lineStyle": {"color": "#eef0f2", "width": 1}}}, {"type": "value", "gridIndex": 1, "axisLabel": {"show": false}, "axisLine": {"show": false}, "axisTick": {"show": false}, "splitLine": {"show": false}}], "dataZoom": [{"type": "inside", "xAxisIndex": [0, 1], "start": 40, "end": 100}, {"type": "slider", "xAxisIndex": [0, 1], "top": "92%", "start": 40, "end": 100, "height": 12, "borderColor": "transparent", "backgroundColor": "#f0f1f3", "fillerColor": "#d5e2f2", "handleStyle": {"color": "#2c6fbb"}, "textStyle": {"color": "#9aa0a8", "fontSize": 9}}], "series": [{"type": "candlestick", "name": "日K", "data": [[10, 10.5, 9.8, 10.6], [10.5, 10.2, 10.0, 10.8], [10.2, 10.9, 10.1, 11.0]], "barWidth": "55%", "itemStyle": {"color": "#d0342c", "color0": "#16a34a", "borderColor": "#d0342c", "borderColor0": "#16a34a", "borderWidth": 1}}, {"type": "bar", "name": "成交量", "xAxisIndex": 1, "yAxisIndex": 1, "data": [100, 120, 130], "itemStyle": {"color": "rgba(44,111,187,.35)"}}]}};
+for (const [id, option] of Object.entries(CHARTS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const chart = echarts.init(el);
+    chart.setOption(option);
+    window.addEventListener("resize", () => chart.resize());
+}
+</script></body></html>

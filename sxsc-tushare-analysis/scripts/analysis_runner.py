@@ -92,7 +92,7 @@ class StockAnalysisRunner:
 
     PERIODS = (5, 20, 60, 120, 250)
     TRADING_DAYS_PER_YEAR = 250
-    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "macro", "momentum_quality", "microstructure", "behavioral", "risk"]
+    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "momentum_quality", "microstructure", "behavioral", "macro", "risk"]
 
     def __init__(
         self,
@@ -158,7 +158,8 @@ class StockAnalysisRunner:
                     total_sales = float(m["bz_sales"].sum())
                     data["mainbz_period"] = str(latest_period)
                     data["mainbz_top3"] = [
-                        {"主营项目": r.get("bz_item"), "营收(元)": _safe_float(r.get("bz_sales")),
+                        {"主营项目": r.get("bz_item"),
+                         "营收(亿元)": (round(_safe_float(r.get("bz_sales")) / 1e8, 2) if _safe_float(r.get("bz_sales")) is not None else None),
                          "占比%": round(float(r.get("bz_sales")) / total_sales * 100, 1) if total_sales else None}
                         for _, r in m.head(3).iterrows()
                     ]
@@ -411,11 +412,11 @@ class StockAnalysisRunner:
             conclusion += (
                 f" 同行业({industry_val.get('industry_name', self.industry)})PE均值 {industry_val.get('pe_mean', 'N/A')}"
                 f"，中位数 {industry_val.get('pe_median', 'N/A')}"
-                f"，本股行业截面分位 {industry_val.get('pe_percentile', 'N/A')}%"
+                f"，本股行业截面分位 {industry_val.get('pe_percentile', 'N/A')}%。"
             )
 
         if div_info:
-            conclusion += f" 近3年实施分红 {div_info['count_3y']} 次，累计每股分红（税前）{div_info['total_cash_div_3y']} 元。"
+            conclusion += f" 近3年实施分红 {div_info['count_3y']} 次，累计每股分红（税前）{self._fmt(div_info['total_cash_div_3y'])} 元。"
 
         return DimensionResult.success("估值分析", conclusion=conclusion, data=data)
 
@@ -637,10 +638,9 @@ class StockAnalysisRunner:
         _period_m = str(latest.get("end_date", ""))[4:6]
         _roe_note = "" if _period_m == "12" else "（非年化口径）"
         conclusion = (
-            f"最新报告期 {latest.get('end_date')}："
-            f"ROE {roe if roe is not None else 'N/A'}%{_roe_note}，"
-            f"毛利率 {gm if gm is not None else 'N/A'}%，"
-            f"资产负债率 {debt if debt is not None else 'N/A'}%。"
+            f"ROE {self._fmt(roe) if roe is not None else 'N/A'}%{_roe_note}，"
+            f"毛利率 {self._fmt(gm) if gm is not None else 'N/A'}%，"
+            f"资产负债率 {self._fmt(debt) if debt is not None else 'N/A'}%。"
         )
         if fscore:
             conclusion += f" Piotroski F-Score {fscore.get('F-Score', 'N/A')}（{fscore.get('rating', '')}）。"
@@ -736,6 +736,7 @@ class StockAnalysisRunner:
                 "count": len(block_df),
                 "total_vol": round(block_df["vol"].sum(), 2),
                 "total_amount": round(block_df["amount"].sum(), 2),
+                "total_amount_billion": round(float(block_df["amount"].sum()) / 1e4, 2),
                 "avg_price": round(block_df["price"].mean(), 2),
                 "latest": block_df.iloc[-1].to_dict(),
             }
@@ -822,7 +823,7 @@ class StockAnalysisRunner:
         br_info = {"count_3m": len(br_records), "brokers": sorted({r["broker"] for r in br_records if r.get("broker")})[:5]}
         data["broker_recommend"] = br_info
         if hsgt_top:
-            _hna_txt = f"{hsgt_top['net_amount_billion']} 亿" if hsgt_top.get("net_amount_billion") is not None else "N/A"
+            _hna_txt = f"{hsgt_top['net_amount_billion']} 亿" if hsgt_top.get("net_amount_billion") is not None else "金额未披露"
             conclusion += f" 近60日上榜沪深股通十大成交股 {hsgt_top['count_60d']} 次（最新净买入 {_hna_txt}）。"
         if rep_info:
             conclusion += f" 近一年回购 {rep_info['count_1y']} 笔，合计 {rep_info['total_amount_wan']} 万元。"
@@ -938,7 +939,7 @@ class StockAnalysisRunner:
                     "count": len(lr),
                     # stk_rewards.reward 单位为元（非万元），换算万元需 /1e4
                     "total_reward_wan": round(pd.to_numeric(lr["reward"], errors="coerce").sum() / 1e4, 1),
-                    "total_hold_vol": round(pd.to_numeric(lr["hold_vol"], errors="coerce").sum(), 0),
+                    "total_hold_vol": (round(pd.to_numeric(lr["hold_vol"], errors="coerce").sum(), 0) if pd.to_numeric(lr["hold_vol"], errors="coerce").notna().any() else None),
                 }
         except Exception:
             pass
@@ -962,10 +963,8 @@ class StockAnalysisRunner:
         if pledge_info and pledge_info.get("pledge_ratio") is not None:
             _pr = pledge_info["pledge_ratio"]
             conclusion += f"；股权质押比例 {_pr}%（{int(pledge_info.get('pledge_count') or 0)} 笔）" + ("，质押比例偏高需关注" if _pr > 30 else "")
-        if managers_count is not None:
-            conclusion += f"；高管披露记录 {managers_count} 条（接口含历史记录，现任数以薪酬披露 {rewards_info['count'] if rewards_info else 'N/A'} 人为准）" if rewards_info else f"；高管披露记录 {managers_count} 条"
         if rewards_info:
-            conclusion += f"（最新报告期 {rewards_info['end_date']} 合计薪酬 {rewards_info['total_reward_wan']} 万元）"
+            conclusion += f"；现任高管 {rewards_info['count']} 人（{rewards_info['end_date']} 报告期合计薪酬 {self._fmt(rewards_info['total_reward_wan'])} 万元）"
 
         return DimensionResult.success("股东筹码", conclusion=conclusion, data=data)
 
@@ -1314,9 +1313,9 @@ class StockAnalysisRunner:
         conclusion = f"动量质量因子分析（数据源：{_src}）。"
         insights = []
         if qm:
-            insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
+            insights.append(f"高质量动量得分 {qm['momentum']}（60日收益 {qm['raw_return'] * 100:.2f}%、日波动 {qm['sigma'] * 100:.2f}%；得分 = 收益 − 3000×方差，越大动量越强且质量越高）")
         if am:
-            insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+            insights.append(f"振幅切割动量：A={am['a_factor']}（低振幅日收益合计，>0 动量正向）、B={am['b_factor']}（高振幅日收益合计，呈反转效应）")
         if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
             insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
         return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
@@ -1355,15 +1354,15 @@ class StockAnalysisRunner:
         if uw_std is not None or lw_mean is not None:
             parts = []
             if uw_std is not None:
-                parts.append(f"上影线std={uw_std}")
+                parts.append(f"上影线波动 {uw_std}")
             if lw_mean is not None:
-                parts.append(f"下影线mean={lw_mean}")
-            dominance = "上影主导(抛压强)" if (uw_std or 0) > (lw_mean or 0) else "下影主导(买气支撑)"
-            insights.append(f"影线因子 {', '.join(parts)}（威廉版；{dominance}）")
+                parts.append(f"下影线均值 {lw_mean}")
+            dominance = "上影线主导，抛压较强" if (uw_std or 0) > (lw_mean or 0) else "下影线主导，买气支撑"
+            insights.append(f"影线因子（威廉版）{', '.join(parts)}，{dominance}")
         if ideal and ideal.get("v") is not None:
             v = ideal["v"]
-            interp = "高价区振幅大于低价区(状态跃迁效应强)" if v > 0 else "低价区振幅大于高价区(负向选股能力)"
-            insights.append(f"理想振幅 V(0.2)={v}（{interp}）")
+            interp = "高价区振幅大于低价区，状态跃迁效应强" if v > 0 else "低价区振幅大于高价区，负向选股能力"
+            insights.append(f"理想振幅 V(0.2)={v}：{interp}")
         return DimensionResult.success("微观结构", conclusion=conclusion, data=data, insights=insights)
 
     # ---------- 维度：行为金融（因子化） ----------
@@ -1412,12 +1411,12 @@ class StockAnalysisRunner:
         insights = []
         if salience and salience.get("terrified_score") is not None:
             ts = salience["terrified_score"]
-            interp = "偏高(过度买入风险)" if ts > 0 else "偏低(未吸引过度注意力)"
-            insights.append(f"凸显度/惊恐度 {ts}（{interp}；用沪深300近似截面均值，低凸显股票未来收益更好）")
+            interp = "偏高，近期收益频繁偏离大盘，警惕注意力驱动的过度交易" if ts > 0 else "偏低，近期走势与大盘贴近，未吸引过度注意力"
+            insights.append(f"凸显度/惊恐度 {ts}：{interp}。注：以沪深300近似截面均值，低凸显股票未来收益更好")
         if cgo and cgo.get("cgo") is not None:
             cv = cgo["cgo"]
-            interp = "浮亏区(投资者惜售，历史负IC预示反弹概率偏高)" if cv < 0 else "浮盈区(投资者可能倾向兑现)"
-            insights.append(f"处置效应 CGO={cv}（{interp}）")
+            interp = "处于浮亏区，投资者惜售情绪或形成支撑，历史负 IC 预示反弹概率偏高" if cv < 0 else "处于浮盈区，投资者可能倾向兑现收益"
+            insights.append(f"处置效应 CGO={cv}：{interp}")
         return DimensionResult.success("行为金融", conclusion=conclusion, data=data, insights=insights)
 
 
@@ -1539,7 +1538,17 @@ class StockAnalysisRunner:
             if res.status != ResultStatus.SUCCESS:
                 notes.append(f"{dim}：{res.note or '数据缺失'}")
 
-        return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes}, risks=risks)
+        # 风险分级：命中高风险关键词（非标审计/质押/严重异常波动/停牌/尾部风险）或信号较多 → 高；有信号 → 中；无 → 低
+        _placeholder = risks == ["未发现显著风险信号（基于已有维度）"]
+        _severe_kw = ("非标准无保留", "质押", "严重异常波动", "停牌", "尾部风险较高", "尾部风险高")
+        _has_severe = any(any(k in r for k in _severe_kw) for r in risks)
+        if _has_severe or (not _placeholder and len(risks) >= 5):
+            risk_level = "高"
+        elif not _placeholder:
+            risk_level = "中"
+        else:
+            risk_level = "低"
+        return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes, "risk_level": risk_level, "risk_count": 0 if _placeholder else len(risks)}, risks=risks)
 
     # ---------- 执行入口 ----------
 
@@ -1756,6 +1765,9 @@ class StockAnalysisRunner:
             res = self.results[risk_dim]
             lines.append(f"## {idx}. 风险提示")
             if res.is_ok() and res.data:
+                _rl = res.data.get("risk_level")
+                if _rl:
+                    lines.append(f"**风险等级**：{_rl}（{res.data.get('risk_count', 0)} 项信号）")
                 for r in res.data.get("risks", []):
                     lines.append(f"- {r}")
                 notes = res.data.get("notes", [])
@@ -2122,7 +2134,12 @@ class StockAnalysisRunner:
                 adv.append(f"尾部风险: 偏度{tr.get('偏度','N/A')}, 峰度{tr.get('峰度(超额)','N/A')}")
             if data.get("amihud"):
                 am = data["amihud"]
-                adv.append(f"Amihud非流动性 {am.get('Amihud非流动性','N/A')}（{am.get('interpretation', '')}）")
+                _am_raw = am.get("Amihud非流动性", "N/A")
+                try:
+                    _am_txt = f"{float(_am_raw):.6f}".rstrip("0").rstrip(".") if isinstance(_am_raw, (int, float)) else str(_am_raw)
+                except Exception:
+                    _am_txt = str(_am_raw)
+                adv.append(f"Amihud非流动性 {_am_txt}（{am.get('interpretation', '')}）")
             if data.get("var_cvar"):
                 vc = data["var_cvar"]
                 adv.append(f"VaR(95%) {vc.get('VaR(95%)','N/A')} | CVaR(95%) {vc.get('CVaR(95%)','N/A')}")
@@ -2165,8 +2182,8 @@ class StockAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(ind_rows)))
             dv3 = data.get("dividends")
             if dv3:
-                lines.append(f"\n**分红记录（近3年实施）**：共 {dv3.get('count_3y')} 次，累计每股分红（税前）{self._fmt(dv3.get('total_cash_div_3y'))} 元")
-                lines.append(self._md(pd.DataFrame(dv3.get("records", []))))
+                lines.append(f"\n**分红记录（近3年实施，最近5次）**：共 {dv3.get('count_3y')} 次，累计每股分红（税前）{self._fmt(dv3.get('total_cash_div_3y'))} 元")
+                lines.append(self._md(pd.DataFrame(dv3.get("records", [])).rename(columns={"ex_date": "除权除息日", "cash_div_tax": "每股分红(税前,元)", "stk_div": "每股送转"})))
             lines.append("")
             lines.append(self._valuation_eval(data))
 
@@ -2174,6 +2191,7 @@ class StockAnalysisRunner:
             import pandas as pd
             trend_list = data.get("trend", [])
             if trend_list:
+                lines.append("**近8期财务指标（累计口径，未年化：一/三季报与中报 ROE 与年报不可直接比较）**")
                 lines.append(self._md(pd.DataFrame(trend_list)))
             g = data.get("growth") or {}
             if g:
@@ -2221,7 +2239,7 @@ class StockAnalysisRunner:
             lines.append(self._md(pd.DataFrame(rows)))
             bt = data.get("block_trade") or {}
             if bt:
-                lines.append(f"\n**大宗交易（近60日）**：共 {bt.get('count','N/A')} 笔，合计 {bt.get('total_amount','N/A')} 万元，均价 {bt.get('avg_price','N/A')} 元")
+                lines.append(f"\n**大宗交易（近60日）**：共 {bt.get('count','N/A')} 笔，合计 {self._fmt(bt.get('total_amount_billion'))} 亿元，均价 {self._fmt(bt.get('avg_price'))} 元")
             ht10 = data.get("hsgt_top10")
             if ht10:
                 lines.append(f"\n**沪深股通十大成交股（近60日）**：上榜 {ht10.get('count_60d','N/A')} 次，最新上榜日 {ht10.get('latest_trade_date','N/A')}，当日排名 {self._fmt(ht10.get('rank'))}，净买入 {self._fmt(ht10.get('net_amount_billion'))} 亿")
@@ -2249,21 +2267,20 @@ class StockAnalysisRunner:
             t10 = data.get("top10_holders", {})
             if t10 and t10.get("records"):
                 lines.append(f"\n**前十大股东（{t10.get('period','N/A')}）**：合计持股 {t10.get('total_hold_ratio','N/A')}%")
-                lines.append(self._md(pd.DataFrame(t10["records"])))
+                lines.append(self._md(pd.DataFrame(t10["records"]).rename(columns={"holder_name": "股东名称", "hold_ratio": "持股比例%", "hold_change": "持股变动(股)"})))
             ht = data.get("holder_trade") or {}
             if ht:
                 lines.append(f"\n**大股东增减持（近半年）**：总记录 {ht.get('total_records','N/A')}，增持 {ht.get('buy_records','N/A')} 次，减持 {ht.get('sell_records','N/A')} 次（数据源：{ht.get('source','N/A')}）")
                 if ht.get("latest_records"):
-                    lines.append(self._md(pd.DataFrame(ht["latest_records"])))
+                    lines.append(self._md(pd.DataFrame(ht["latest_records"]).rename(columns={"holder_name": "股东名称", "hold_change": "持股变动(股)", "hold_ratio": "持股比例%"})))
             pl = data.get("pledge")
             if pl:
                 _pl_high = isinstance(pl.get("pledge_ratio"), (int, float)) and pl.get("pledge_ratio") > 30
                 lines.append(f"\n**股权质押（{pl.get('end_date', 'N/A')}）**：质押 {self._fmt(pl.get('pledge_count'), digits=0)} 笔，质押比例 {self._fmt(pl.get('pledge_ratio'))}%" + ("（偏高，需关注）" if _pl_high else ""))
-            if data.get("managers_count") is not None:
-                lines.append(f"\n**管理层**：披露记录 {data.get('managers_count')} 条（stk_managers 接口含历史记录且未区分在任/离任，现任规模以下方薪酬披露人数为准）")
             mr = data.get("manager_rewards")
             if mr:
-                lines.append(f"**薪酬持股（{mr.get('end_date')} 报告期）**：披露 {mr.get('count')} 人，合计薪酬 {self._fmt(mr.get('total_reward_wan'))} 万元，合计持股 {self._fmt(mr.get('total_hold_vol'), digits=0)} 股")
+                _hold = f"，合计持股 {self._fmt(mr.get('total_hold_vol'), digits=0)} 股" if mr.get("total_hold_vol") is not None else "（持股数据未披露）"
+                lines.append(f"**管理层（{mr.get('end_date')} 报告期）**：披露 {mr.get('count')} 人，合计薪酬 {self._fmt(mr.get('total_reward_wan'))} 万元{_hold}")
             lines.append("")
             lines.append(self._shareholder_eval(data))
 
@@ -2328,13 +2345,13 @@ class StockAnalysisRunner:
             rows = []
             qm = data.get("quantitative_momentum", {})
             if qm:
-                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"))})
-                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"))})
-                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"))})
+                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"), digits=4)})
+                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"), digits=4)})
+                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"), digits=4)})
             am = data.get("amplitude_momentum", {})
             if am:
-                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
-                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"), digits=4)})
+                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"), digits=4)})
             if data.get("source"):
                 rows.append({"指标": "数据源", "数值": data["source"]})
             if rows:
@@ -2350,10 +2367,10 @@ class StockAnalysisRunner:
             rows = []
             shadow = data.get("shadow_factors", {})
             for k, v in shadow.items():
-                rows.append({"指标": shadow_map.get(k, k), "数值": self._fmt(v)})
+                rows.append({"指标": shadow_map.get(k, k), "数值": self._fmt(v, digits=4)})
             ideal = data.get("ideal_amplitude", {})
             if ideal:
-                rows.append({"指标": "理想振幅V(0.2)", "数值": self._fmt(ideal.get("v"))})
+                rows.append({"指标": "理想振幅V(0.2)", "数值": self._fmt(ideal.get("v"), digits=4)})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 
@@ -2361,10 +2378,10 @@ class StockAnalysisRunner:
             rows = []
             sal = data.get("salience", {})
             if sal:
-                rows.append({"指标": "凸显度/惊恐度", "数值": self._fmt(sal.get("terrified_score"))})
+                rows.append({"指标": "凸显度/惊恐度", "数值": self._fmt(sal.get("terrified_score"), digits=6)})
             cgo = data.get("cgo", {})
             if cgo:
-                rows.append({"指标": "处置效应CGO", "数值": self._fmt(cgo.get("cgo"))})
+                rows.append({"指标": "处置效应CGO", "数值": self._fmt(cgo.get("cgo"), digits=4)})
                 rows.append({"指标": "参考价RP", "数值": self._fmt(cgo.get("rp"))})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
