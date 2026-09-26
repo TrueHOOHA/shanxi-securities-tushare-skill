@@ -47,8 +47,7 @@ from risk_modeling import (
 from technical_indicators import calc_boll, calc_kdj, calc_macd, calc_rsi, calc_volume_ratio
 from factor_signals import (
     calc_amplitude_momentum, calc_cgo,
-    calc_ideal_amplitude, calc_quantitative_momentum, calc_salience_score,
-    calc_shadow_factors,
+    calc_quantitative_momentum, calc_salience_score,
 )
 
 
@@ -92,7 +91,7 @@ class StockAnalysisRunner:
 
     PERIODS = (5, 20, 60, 120, 250)
     TRADING_DAYS_PER_YEAR = 250
-    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "momentum_quality", "microstructure", "behavioral", "macro", "risk"]
+    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "momentum_quality", "behavioral", "macro", "risk"]
 
     def __init__(
         self,
@@ -1320,51 +1319,6 @@ class StockAnalysisRunner:
             insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
         return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
 
-    # ---------- 维度：微观结构（因子化） ----------
-
-    @safe_result("微观结构")
-    def analyze_microstructure(self) -> DimensionResult:
-        start = shift_date(self.end_date, -250)
-        df_daily = self.api.get_daily(self.ts_code, start, self.end_date)
-        if df_daily is None:
-            return DimensionResult.empty("微观结构", note="无法获取日线行情")
-        df_adj = self.api.get_adj_factor(self.ts_code, start, self.end_date)
-        if df_adj is not None:
-            df = apply_adj_factor(df_daily, df_adj)
-            op = df["open_post"].sort_index()
-            high = df["high_post"].sort_index()
-            low = df["low_post"].sort_index()
-            close = df["close_post"].sort_index()
-        else:
-            df = df_daily.sort_values("trade_date").set_index("trade_date")
-            op = df["open"].sort_index()
-            high = df["high"].sort_index()
-            low = df["low"].sort_index()
-            close = df["close"].sort_index()
-        if len(close) < 26:
-            return DimensionResult.insufficient_history("微观结构", note="需至少26日数据")
-
-        shadow = calc_shadow_factors(op, high, low, close)
-        ideal = calc_ideal_amplitude(close, high, low, n=20, lam=0.2)
-        data = {"shadow_factors": shadow, "ideal_amplitude": ideal}
-        conclusion = "微观结构因子分析。"
-        insights = []
-        uw_std = shadow.get("upper_w_std")
-        lw_mean = shadow.get("lower_w_mean")
-        if uw_std is not None or lw_mean is not None:
-            parts = []
-            if uw_std is not None:
-                parts.append(f"上影线波动 {uw_std}")
-            if lw_mean is not None:
-                parts.append(f"下影线均值 {lw_mean}")
-            dominance = "上影线主导，抛压较强" if (uw_std or 0) > (lw_mean or 0) else "下影线主导，买气支撑"
-            insights.append(f"影线因子（威廉版）{', '.join(parts)}，{dominance}")
-        if ideal and ideal.get("v") is not None:
-            v = ideal["v"]
-            interp = "高价区振幅大于低价区，状态跃迁效应强" if v > 0 else "低价区振幅大于高价区，负向选股能力"
-            insights.append(f"理想振幅 V(0.2)={v}：{interp}")
-        return DimensionResult.success("微观结构", conclusion=conclusion, data=data, insights=insights)
-
     # ---------- 维度：行为金融（因子化） ----------
 
     @safe_result("行为金融")
@@ -1572,7 +1526,6 @@ class StockAnalysisRunner:
             "market_activity": self.analyze_market_activity,
             "macro": self.analyze_macro,
             "momentum_quality": self.analyze_momentum_quality,
-            "microstructure": self.analyze_microstructure,
             "behavioral": self.analyze_behavioral,
         }
         to_run = {d: dim_methods[d] for d in parallel_dims if d in dim_methods}
@@ -1610,7 +1563,6 @@ class StockAnalysisRunner:
         "market_activity": "市场异动",
         "macro": "宏观环境",
         "momentum_quality": "动量质量",
-        "microstructure": "微观结构",
         "behavioral": "行为金融",
         "risk": "风险提示",
     }
@@ -1628,7 +1580,6 @@ class StockAnalysisRunner:
         "market_activity": "市场异动：涨跌停、龙虎榜与机构席位，捕捉短期资金的极端关注。",
         "macro": "宏观环境：大盘走势、CPI/PPI、LPR 与 GDP，判断整体顺风或逆风。",
         "momentum_quality": "动量质量：用风险调整后的动量得分，判断涨势是稳健的小波动驱动（高质量）还是少数大波动堆出来的（低质量、持续性存疑）。",
-        "microstructure": "微观结构：从K线影线、实体与振幅分布看多空在盘中的支撑与攻击力度。",
         "behavioral": "行为金融：从凸显度、处置效应与参考点看市场情绪偏差与投资者心理锚。",
         "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
     }
@@ -2357,22 +2308,6 @@ class StockAnalysisRunner:
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
 
-        elif res.title == "微观结构":
-            shadow_map = {
-                "upper_c_mean": "上影线均值", "upper_c_std": "上影线波动",
-                "lower_c_mean": "下影线均值", "lower_c_std": "下影线波动",
-                "upper_w_mean": "上实体均值", "upper_w_std": "上实体波动",
-                "lower_w_mean": "下实体均值", "lower_w_std": "下实体波动",
-            }
-            rows = []
-            shadow = data.get("shadow_factors", {})
-            for k, v in shadow.items():
-                rows.append({"指标": shadow_map.get(k, k), "数值": self._fmt(v, digits=4)})
-            ideal = data.get("ideal_amplitude", {})
-            if ideal:
-                rows.append({"指标": "理想振幅V(0.2)", "数值": self._fmt(ideal.get("v"), digits=4)})
-            if rows:
-                lines.append(self._md(pd.DataFrame(rows)))
 
         elif res.title == "行为金融":
             rows = []
