@@ -44,3 +44,4 @@ venv/
 
 # Claude Code worktrees
 .claude/
+sxsc-tushare-analysis/scripts/_selfcheck_report.html
