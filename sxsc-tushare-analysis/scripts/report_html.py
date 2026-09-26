@@ -27,23 +27,26 @@ body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',system
 .toc-title{font-size:12px;color:var(--faint);font-weight:600;margin-bottom:8px;letter-spacing:.05em}
 .toc a{display:flex;gap:8px;color:var(--muted);text-decoration:none;padding:4px 6px;border-radius:6px;line-height:1.4}
 .toc a:hover{color:var(--accent);background:#eef4fb}
+.toc a.active{color:var(--accent);background:#eef4fb;font-weight:600}
 .toc a .n{color:var(--faint);font-size:11px;min-width:16px;text-align:right}
 @media (max-width:920px){.layout{display:block;padding:44px 20px 80px}.toc{display:none}}
 h1{font-size:24px;font-weight:700;letter-spacing:.005em;margin-bottom:6px}
-blockquote{font-size:13px;color:var(--muted);margin:0 0 30px}
-h2{font-size:17px;font-weight:600;display:flex;align-items:baseline;gap:10px;margin:38px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+blockquote{font-size:13px;color:var(--muted);margin:0 0 12px;padding-left:10px;border-left:2px solid var(--border)}
+h2{font-size:17px;font-weight:600;display:flex;align-items:baseline;gap:10px;margin:38px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border);scroll-margin-top:16px}
 h2 .num{color:var(--faint);font-weight:600;font-size:12.5px}
 h3{font-size:13.5px;font-weight:600;color:#333;margin:20px 0 8px}
 p{font-size:13.5px;margin-bottom:10px}
+p.ph{margin-top:20px}
 p em{color:var(--muted);font-size:12px}
-.table-wrap{overflow-x:auto;margin:14px 0 8px}
+.table-wrap{overflow-x:auto;margin:14px 0 8px;border:1px solid var(--border);border-radius:8px}
 table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
-thead th{padding:8px 12px;font-weight:600;color:#333;text-align:left;border-bottom:1.5px solid #333;white-space:nowrap;letter-spacing:.02em}
+thead th{padding:8px 12px;font-weight:600;color:#333;text-align:left;background:#f7f8f9;border-bottom:1.5px solid #333;white-space:nowrap;letter-spacing:.02em}
 tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
 td.r{text-align:right;white-space:nowrap}
 th.r{text-align:right}
-tbody td:first-child{white-space:nowrap;font-weight:500;padding-right:22px}
-tbody tr:hover{background:#f5f7fa}
+tbody td:first-child{white-space:normal;word-break:break-word;min-width:8em;max-width:26em;font-weight:500;padding-right:22px}
+tbody tr:nth-child(even){background:#fafbfc}
+tbody tr:hover{background:#eef4fb}
 tbody tr:last-child td{border-bottom:none}
 code{font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:12.5px;background:#f4f5f6;padding:1px 6px;border-radius:4px}
 ul{margin:8px 0 14px;padding-left:20px}
@@ -54,7 +57,11 @@ hr{border:none;border-top:1px solid var(--border);margin:30px 0 10px}
 .kpi{background:#f7f8f9;border:1px solid var(--border);border-radius:12px;padding:10px 18px;min-width:96px}
 .kpi-label{font-size:11.5px;color:var(--muted);margin-bottom:3px}
 .kpi-value{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
-.footer{color:var(--faint);font-size:12px;margin-top:44px;padding-top:14px;border-top:1px solid var(--border);text-align:center}
+.kpi-value.up{color:#d0342c}
+.kpi-value.down{color:#16a34a}
+.badge{display:inline-block;color:#fff;font-size:12px;font-weight:600;padding:1px 10px;border-radius:10px;margin:0 2px;vertical-align:1px}
+.footer{color:var(--faint);font-size:12px;margin-top:0;padding-top:6px;text-align:center}
+@media print{.toc{display:none}.layout{display:block;max-width:none;padding:0}.chart{height:340px}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{page-break-after:avoid}.table-wrap{page-break-inside:avoid}}
 """
 
 _INIT_JS = """
@@ -64,6 +71,24 @@ for (const [id, option] of Object.entries(CHARTS)) {
     const chart = echarts.init(el);
     chart.setOption(option);
     window.addEventListener("resize", () => chart.resize());
+}
+// 目录 scrollspy：滚动时高亮当前章节
+if (window.IntersectionObserver) {
+    const _links = [...document.querySelectorAll('.toc a')];
+    if (_links.length) {
+        const _byId = {};
+        _links.forEach(a => _byId[a.getAttribute('href').slice(1)] = a);
+        const _obs = new IntersectionObserver(es => {
+            es.forEach(e => {
+                if (e.isIntersecting) {
+                    _links.forEach(a => a.classList.remove('active'));
+                    const a = _byId[e.target.id];
+                    if (a) a.classList.add('active');
+                }
+            });
+        }, {rootMargin: '-15% 0px -75% 0px'});
+        document.querySelectorAll('h2[id]').forEach(h => _obs.observe(h));
+    }
 }
 """
 
@@ -143,6 +168,9 @@ def md_to_html(md: str) -> str:
     i = 0
     while i < len(lines):
         s = lines[i].strip()
+        if not s:  # 跳过空行：避免空行并入下一段落（段首空格 + 破坏 ** 前缀判定）
+            i += 1
+            continue
         if s.startswith("# "):
             out.append(f"<h1>{_inline(s[2:])}</h1>")
         elif s.startswith("## "):
@@ -175,7 +203,8 @@ def md_to_html(md: str) -> str:
             while i < len(lines) and not _is_block_start(lines[i].strip()):
                 para.append(lines[i].strip())
                 i += 1
-            out.append(f"<p>{_inline(' '.join(para))}</p>")
+            _pcls = " class='ph'" if para and para[0].startswith("**") else ""
+            out.append(f"<p{_pcls}>{_inline(' '.join(para))}</p>")
             continue
         i += 1
     return "\n".join(out)
@@ -379,8 +408,14 @@ def _kpi_items(results):
 def _kpi_html(items):
     if not items:
         return ""
+    def _kpi_cls(k, v):
+        s = str(v)
+        # 仅对区间涨跌幅着色（红涨绿跌）；波动/分位等无方向语义的不着色
+        if not ("日" in k or "涨幅" in k) or not s.endswith("%"):
+            return ""
+        return " down" if s.startswith("-") else " up"
     cards = "".join(
-        f'<div class="kpi"><div class="kpi-label">{_html.escape(k)}</div><div class="kpi-value">{_html.escape(str(v))}</div></div>'
+        f'<div class="kpi"><div class="kpi-label">{_html.escape(k)}</div><div class="kpi-value{_kpi_cls(k, v)}">{_html.escape(str(v))}</div></div>'
         for k, v in items
     )
     return f'<div class="kpi-bar">{cards}</div>'
@@ -442,15 +477,30 @@ def render_html_report(md_text: str, results) -> str:
         else:
             head_html = _inline(heading)
             parts.append(f"<h2>{head_html}</h2>")
+        # 章节开头连续引用块（维度含义）先于图表渲染，保持 含义→图→正文 顺序
+        lead, k = [], 0
+        while k < len(body) and body[k].strip().startswith("> "):
+            lead.append(body[k])
+            k += 1
+        if lead:
+            parts.append(md_to_html("\n".join(lead)))
         parts.append(_chart_divs(heading))
-        if any(line.strip() for line in body):
-            parts.append(md_to_html("\n".join(body)))
+        rest = body[k:]
+        if any(line.strip() for line in rest):
+            parts.append(md_to_html("\n".join(rest)))
 
     # 未匹配到章节的图表回退到附录
     leftover = [i for idxs in by_title.values() for i in idxs]
     if leftover:
         parts.append("<h2>附录：可视化图表</h2>" + "".join(
             f'<div id="chart-{i}" class="chart"></div>' for i in leftover))
+
+    body_html = "\n".join(parts)
+    # 风险等级徽标：高=红 中=橙 低=绿
+    def _badge(m):
+        color = {"高": "#d0342c", "中": "#d97706", "低": "#16a34a"}[m.group(2)]
+        return f"{m.group(1)}<span class='badge' style='background:{color}'>{m.group(2)}</span>{m.group(3)}"
+    body_html = re.sub(r"(<strong>风险等级</strong>：)(高|中|低)(（\d+ 项信号）)", _badge, body_html)
 
     chart_js = json.dumps(
         {f"chart-{i}": all_opts[i] for i in range(len(all_opts))}, ensure_ascii=False
@@ -465,7 +515,7 @@ def render_html_report(md_text: str, results) -> str:
         f"<script src='{ECHARTS_CDN}'></script>"
         f"<style>{_CSS}</style></head><body>"
         + "<div class='layout'>" + toc_html + "<main class='content'>"
-        + "\n".join(parts)
+        + body_html
         + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）</div>"
         + "</main></div>"
         + f"<script>const CHARTS = {chart_js};{_INIT_JS}</script>"
