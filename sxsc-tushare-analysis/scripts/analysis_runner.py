@@ -870,7 +870,7 @@ class StockAnalysisRunner:
                 "period": latest_period,
                 "holder_count": len(latest_top10),
                 "total_hold_ratio": round(_safe_float(latest_top10["hold_ratio"].sum()), 2),
-                "records": latest_top10[["holder_name", "hold_ratio", "hold_change"]].head(5).to_dict("records"),
+                "records": latest_top10[["holder_name", "hold_ratio", "hold_change"]].head(10).to_dict("records"),
             }
 
         # 大股东增减持：优先用 stk_holdertrade，否则用 top10_holders 的 hold_change 降级
@@ -895,7 +895,8 @@ class StockAnalysisRunner:
                 latest_top10_df["hold_change"] = pd.to_numeric(latest_top10_df["hold_change"], errors="coerce").fillna(0)
                 buy = latest_top10_df[latest_top10_df["hold_change"] > 0]
                 sell = latest_top10_df[latest_top10_df["hold_change"] < 0]
-                records = latest_top10_df.sort_values("hold_change", ascending=False).head(5)[["holder_name", "hold_change", "hold_ratio"]].to_dict("records")
+                changed = latest_top10_df[latest_top10_df["hold_change"] != 0]
+                records = (changed.sort_values("hold_change", key=lambda s: s.abs(), ascending=False).head(5)[["holder_name", "hold_change", "hold_ratio"]].to_dict("records") if not changed.empty else [])
                 trade_summary = {
                     "source": "top10_holders_hold_change",
                     "total_records": len(latest_top10_df),
@@ -943,6 +944,12 @@ class StockAnalysisRunner:
         except Exception:
             pass
 
+        # 前十大股东持股比例饼图（chart 管线自动注入到股东筹码节）
+        _pie_data = [
+            {"name": str(r.get("holder_name", "")), "value": r.get("hold_ratio")}
+            for r in ((top10_summary or {}).get("records") or [])
+            if isinstance(r.get("hold_ratio"), (int, float)) and r.get("hold_ratio") > 0
+        ]
         data = {
             "holder_num": latest,
             "latest_qoq": latest_chg,
@@ -953,6 +960,7 @@ class StockAnalysisRunner:
             "pledge": pledge_info,
             "managers_count": managers_count,
             "manager_rewards": rewards_info,
+            "chart": ({"title": "前十大股东持股比例分布（%）", "type": "pie", "data": _pie_data} if _pie_data else None),
         }
         conclusion = f"最新股东户数 {latest:,}，环比 {latest_chg:+.1f}%，{signal}。"
         if top10_summary:
@@ -2221,7 +2229,8 @@ class StockAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(t10["records"]).rename(columns={"holder_name": "股东名称", "hold_ratio": "持股比例%", "hold_change": "持股变动(股)"})))
             ht = data.get("holder_trade") or {}
             if ht:
-                lines.append(f"\n**大股东增减持（近半年）**：总记录 {ht.get('total_records','N/A')}，增持 {ht.get('buy_records','N/A')} 次，减持 {ht.get('sell_records','N/A')} 次（数据源：{ht.get('source','N/A')}）")
+                _src_note = "增减持公告口径" if ht.get("source") == "stk_holdertrade" else "最新一期前十大持股变动口径"
+                lines.append(f"\n**大股东增减持（{_src_note}）**：总记录 {ht.get('total_records','N/A')}，增持 {ht.get('buy_records','N/A')} 次，减持 {ht.get('sell_records','N/A')} 次")
                 if ht.get("latest_records"):
                     lines.append(self._md(pd.DataFrame(ht["latest_records"]).rename(columns={"holder_name": "股东名称", "hold_change": "持股变动(股)", "hold_ratio": "持股比例%"})))
             pl = data.get("pledge")

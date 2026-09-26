@@ -282,6 +282,26 @@ def _line_bar_option(c):
     }
 
 
+def _pie_option(c):
+    """饼图规格：c["data"] = [{"name": str, "value": number}, ...]，value 为占比数值（如持股比例%）。"""
+    return {
+        "tooltip": {"trigger": "item", "formatter": "{b}<br/>{c}%"},
+        "legend": {"type": "scroll", "orient": "vertical", "right": 4, "top": "middle",
+                    "icon": "circle", "itemWidth": 8, "textStyle": {"fontSize": 11}},
+        "series": [{
+            "type": "pie",
+            "radius": ["38%", "64%"],
+            "center": ["36%", "52%"],
+            "minAngle": 2,
+            "avoidLabelOverlap": True,
+            "itemStyle": {"borderRadius": 4, "borderColor": "#fff", "borderWidth": 1},
+            "label": {"show": False},
+            "emphasis": {"label": {"show": True, "fontSize": 12}},
+            "data": c["data"],
+        }],
+    }
+
+
 def _chart_options(results):
     """按维度顺序收集各维度的图表 option，返回 [(维度标题, option), ...]。"""
     out = []
@@ -289,12 +309,14 @@ def _chart_options(results):
         if not (res.is_ok() and res.data):
             continue
         c = res.data.get("chart")
-        if not c or "dates" not in c:
+        if not c:
             continue
         if c.get("type") == "candlestick" and "ohlc" in c:
             out.append((res.title, _candlestick_option(c)))
         elif c.get("type") in ("line", "bar") and c.get("series"):
             out.append((res.title, _line_bar_option(c)))
+        elif c.get("type") == "pie" and c.get("data"):
+            out.append((res.title, _pie_option(c)))
     return out
 
 
