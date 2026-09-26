@@ -28,9 +28,12 @@ def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
     beta = round(float(cov / var), 2)
     alpha_daily = stock.mean() - (risk_free / periods) - beta * (market.mean() - risk_free / periods)
     alpha_annual = round(float(alpha_daily * periods * 100), 2)
+    # R² = 回归解释力；低于 0.3 时 Beta/Alpha 估计不稳定，展示与风格判定均应标注不可靠
+    r2 = round(float(np.corrcoef(stock, market)[0, 1] ** 2), 3)
     return {
         "Beta": beta,
         "Alpha(年化%)": alpha_annual,
+        "R2": r2,
         "interpretation": f"市场敏感度{'高' if beta > 1.2 else ('低' if beta < 0.8 else '适中')}，{'跑赢' if alpha_annual > 0 else '跑输'}市场"
     }
 

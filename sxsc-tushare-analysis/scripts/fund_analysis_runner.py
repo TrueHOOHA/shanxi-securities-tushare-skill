@@ -27,7 +27,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from adjustment import apply_fund_adj, apply_etf_adj
+from adjustment import apply_adj_factor, apply_fund_adj, apply_etf_adj
+from factor_signals import calc_amplitude_momentum, calc_quantitative_momentum
 from basic_metrics import calc_max_drawdown, calc_returns, calc_sharpe, calc_volatility
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
@@ -55,7 +56,7 @@ class FundAnalysisRunner:
     """基金综合分析 Runner。"""
 
     PERIODS = (5, 20, 60, 120, 250)
-    DEFAULT_DIMENSIONS = ["overview", "nav", "performance", "peer", "manager", "portfolio", "share", "div", "risk"]
+    DEFAULT_DIMENSIONS = ["overview", "nav", "performance", "peer", "manager", "portfolio", "share", "div", "momentum_quality", "risk"]
 
     def __init__(
         self,
@@ -86,6 +87,7 @@ class FundAnalysisRunner:
         self.fund_name = row.get("name")
         self.fund_type = row.get("fund_type")
         self.found_date = row.get("found_date")
+        self.benchmark = row.get("benchmark")
 
         data = {
             "ts_code": self.ts_code,
@@ -95,6 +97,26 @@ class FundAnalysisRunner:
             "list_date": row.get("list_date"),
             "delist_date": row.get("delist_date"),
         }
+        # 管理人信息（fund_company 接口无入参返回全量，按管理人名称本地过滤）
+        mgmt_name = row.get("management")
+        if mgmt_name:
+            data["management"] = mgmt_name
+            try:
+                fc_df = self.api.get_fund_company()
+                if fc_df is not None and not fc_df.empty and "name" in fc_df.columns:
+                    fc_hit = fc_df[fc_df["name"] == mgmt_name]
+                    if not fc_hit.empty:
+                        fc = fc_hit.iloc[0]
+                        data["manager_company"] = {
+                            "shortname": fc.get("shortname"),
+                            "setup_date": fc.get("setup_date"),
+                            "employees": fc.get("employees"),
+                            "reg_capital": fc.get("reg_capital"),
+                            "chairman": fc.get("chairman"),
+                        }
+            except Exception:
+                pass
+
         return DimensionResult.success("概况", data=data)
 
     # ---------- 维度：净值走势 ----------
@@ -129,11 +151,48 @@ class FundAnalysisRunner:
         if len(nav_series) < 2:
             return DimensionResult.insufficient_history("净值走势", note="净值历史数据不足")
 
+        # ETF 专项：折溢价率（收盘价 vs 单位净值）与跟踪误差（对基准指数）
+        etf_check = None
+        if _is_etf(self.ts_code):
+            try:
+                _nav_df = self.api.get_fund_nav(self.ts_code, start, self.end_date)
+                if _nav_df is not None and not _nav_df.empty:
+                    _nd = _nav_df.sort_values("nav_date").drop_duplicates("nav_date").set_index("nav_date")["unit_nav"]
+                    _px = df_daily.sort_values("trade_date").drop_duplicates("trade_date").set_index("trade_date")["close"]
+                    _j = pd.DataFrame({"px": _px, "nav": _nd}).dropna()  # 两序列按日期索引自动对齐
+                    if len(_j) >= 20:
+                        etf_check = {"premium_discount_pct": round(float((_j["px"] / _j["nav"] - 1).iloc[-1] * 100), 2)}
+                # 跟踪误差：ETF 日收益(复权) vs 基准指数日收益
+                _bmap = {"沪深300": "000300.SH", "中证500": "000905.SH", "上证50": "000016.SH",
+                         "创业板": "399006.SZ", "科创50": "000688.SH", "中证1000": "000852.SH", "中证800": "000906.SH"}
+                _bench_txt = str(getattr(self, "benchmark", "") or "")
+                _bcode = next((_v for _k, _v in _bmap.items() if _k in _bench_txt), None)
+                if _bcode:
+                    _bdf = self.api.get_index_daily(_bcode, start, self.end_date)
+                    if _bdf is not None and not _bdf.empty:
+                        _bser = _bdf.set_index("trade_date")["close"].sort_index().pct_change().dropna()
+                        _eser = nav_series.pct_change().dropna()
+                        _diff = pd.DataFrame({"etf": _eser, "idx": _bser}).dropna()
+                        _diff.index = _diff.index.astype(str)
+                        _dup = _diff.index.duplicated()
+                        _diff = _diff[~_dup]
+                        if len(_diff) >= 60:
+                            etf_check = etf_check or {}
+                            etf_check["benchmark_code"] = _bcode
+                            etf_check["tracking_error_ann_pct"] = round(float(_diff["etf"].sub(_diff["idx"]).std() * (252 ** 0.5) * 100), 2)
+            except Exception:
+                etf_check = etf_check if isinstance(etf_check, dict) else None
+
         returns = calc_returns(nav_series, periods=self.PERIODS)
         conclusion = f"最新净值 {latest_nav}，近20日 {returns.get('近20日涨幅%', 'N/A')}%"
+        if etf_check and etf_check.get("premium_discount_pct") is not None:
+            conclusion += f"，最新折溢价 {etf_check['premium_discount_pct']:+.2f}%（收盘价 vs 单位净值）"
+        if etf_check and etf_check.get("tracking_error_ann_pct") is not None:
+            conclusion += f"，年化跟踪误差 {etf_check['tracking_error_ann_pct']:.2f}%（基准 {etf_check.get('benchmark_code')}）"
         return DimensionResult.success("净值走势", conclusion=conclusion, data={
             "latest_nav": latest_nav,
             "returns": returns,
+            "etf_check": etf_check,
             "chart": {
                 "title": "净值走势（复权）",
                 "type": "line",
@@ -255,6 +314,18 @@ class FundAnalysisRunner:
         latest = df.iloc[-1]
         latest_share = _safe_float(latest.get("fd_share"))
 
+
+        # 最新规模 = 份额(万份) × 单位净值 / 1e4（亿元）
+        latest_scale_yi = None
+        try:
+            _nav_df = self.api.get_fund_nav(self.ts_code, shift_date(self.end_date, -30), self.end_date)
+            if _nav_df is not None and not _nav_df.empty:
+                _unit_nav = _safe_float(_nav_df.sort_values("nav_date").iloc[-1].get("unit_nav"))
+                if _unit_nav and latest_share:
+                    latest_scale_yi = round(latest_share * _unit_nav / 1e4, 2)
+        except Exception:
+            pass
+
         # 份额拆分归一化：拆分日 fd_share 与 fund_adj 因子同步跳变。
         # 检测后把历史份额统一到最新拆分口径，避免"最新 vs 季度变化"不可比。
         split_note = ""
@@ -295,6 +366,7 @@ class FundAnalysisRunner:
             "latest_share": latest_share,
             "quarterly_changes": share_changes,
             "split_note": split_note,
+            "latest_scale_yi": latest_scale_yi,
         }
         conclusion = f"最新份额 {latest_share:,.2f} 万份"
         if len(share_changes) >= 2:
@@ -520,6 +592,61 @@ class FundAnalysisRunner:
         conclusion = f"同类基金({peer_scope})共 {len(peer_df)} 只，本基金近20日收益排名约 {rank20}% 分位"
         return DimensionResult.success("同类对比", conclusion=conclusion, data=data)
 
+    # ---------- 维度：动量质量（因子化，自包含取数） ----------
+
+    @safe_result("动量质量")
+    def analyze_momentum_quality(self) -> DimensionResult:
+        start = shift_date(self.end_date, -max(self.PERIODS) * 2)
+        qm = am = None
+        if _is_etf(self.ts_code):
+            # ETF：fund_daily OHLC 全列复权（apply_adj_factor 适配 fund_daily，拆分日不跳变）
+            df_daily = self.api.get_fund_daily(self.ts_code, start, self.end_date)
+            if df_daily is None or df_daily.empty:
+                return DimensionResult.empty("动量质量", note="无法获取 ETF 行情")
+            df_adj = self.api.get_fund_adj(self.ts_code, start, self.end_date)
+            if df_adj is not None and not df_adj.empty:
+                df = apply_adj_factor(df_daily, df_adj)
+                price = df["close_post"].sort_index()
+                high = df["high_post"].sort_index()
+                low = df["low_post"].sort_index()
+                _src = "ETF 复权行情"
+            else:
+                df = df_daily.sort_values("trade_date").set_index("trade_date")
+                price = df["close"].sort_index()
+                high = df["high"].sort_index()
+                low = df["low"].sort_index()
+                _src = "ETF 未复权行情（缺复权因子，拆分日可能失真）"
+            if len(price) < 121:
+                return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
+            qm = calc_quantitative_momentum(price, window=60)
+            am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3)
+        else:
+            # 场外：复权净值序列（adj_nav 优先，缺失退回 unit_nav）；无 OHLC，振幅切割不适用
+            df_nav = self.api.get_fund_nav(self.ts_code, start, self.end_date)
+            if df_nav is None or df_nav.empty:
+                return DimensionResult.empty("动量质量", note="无法获取基金净值")
+            _nd = df_nav.sort_values("nav_date").drop_duplicates("nav_date")
+            _use_adj = "adj_nav" in _nd.columns and _nd["adj_nav"].notna().any()
+            series = (_nd.set_index("nav_date")["adj_nav"] if _use_adj else _nd.set_index("nav_date")["unit_nav"]).sort_index()
+            _src = "复权净值(adj_nav)" if _use_adj else "单位净值(unit_nav)"
+            if len(series) < 121:
+                return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
+            qm = calc_quantitative_momentum(series, window=60)
+
+        data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
+        conclusion = f"动量质量因子分析（数据源：{_src}）。"
+        insights = []
+        if qm:
+            insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
+        if am:
+            insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+        else:
+            insights.append("场外基金无 OHLC，振幅切割动量不适用")
+        if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
+            insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
+        return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
+
+
     # ---------- 维度：风险提示 ----------
 
     def analyze_risk(self) -> DimensionResult:
@@ -582,6 +709,7 @@ class FundAnalysisRunner:
             "portfolio": self.analyze_portfolio,
             "share": self.analyze_share,
             "div": self.analyze_dividend,
+            "momentum_quality": self.analyze_momentum_quality,
         }
         to_run = {d: dim_methods[d] for d in parallel_dims if d in dim_methods}
         if to_run:
@@ -648,7 +776,7 @@ class FundAnalysisRunner:
         for col in df.columns:
             if df[col].dtype.kind in "iufc":
                 df[col] = df[col].apply(lambda x: self._fmt(x))
-            elif df[col].dtype == object:
+            else:  # 兜底：pandas 3.x 新 str dtype 不属于 object，也需清洗 NaN
                 df[col] = df[col].apply(
                     lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                     else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x))
@@ -658,7 +786,7 @@ class FundAnalysisRunner:
     DIM_TITLES = {
         "overview": "概况", "nav": "净值走势", "performance": "业绩指标",
         "peer": "同类对比", "manager": "基金经理", "portfolio": "持仓分析",
-        "share": "规模变化", "div": "分红", "risk": "风险提示",
+        "share": "规模变化", "div": "分红", "momentum_quality": "动量质量", "risk": "风险提示",
     }
 
     def _overall_conclusion(self) -> str:
@@ -704,6 +832,11 @@ class FundAnalysisRunner:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
                 lines.extend(self._render_dimension(res))
+                if res.insights:
+                    lines.append("")
+                    lines.append("**因子洞察**：")
+                    for _ins in res.insights:
+                        lines.append(f"- {_ins}")
             elif res.note:
                 lines.append(f"- {res.note}")
             lines.append("")
@@ -800,7 +933,7 @@ class FundAnalysisRunner:
             else:
                 points.append(f"- **规模**：最新份额 {self._fmt(latest_share)} 万份{split_note}")
         if peer and peer.is_ok() and peer.data:
-            own = peer.data.get("own", {})
+            own = peer.data.get("own") or {}
             rank = own.get("近20日%排名%", "N/A")
             total_peers = peer.data.get("peer_total") or len(peer.data.get("peers", []))
             scope = peer.data.get("scope") or self.fund_type or "同类"
@@ -862,17 +995,30 @@ class FundAnalysisRunner:
         if res.title == "概况":
             label_map = {
                 "ts_code": "基金代码", "name": "基金简称", "fund_type": "基金类型",
-                "found_date": "成立日期", "list_date": "上市日期", "delist_date": "退市日期",
+                "found_date": "成立日期", "list_date": "上市日期", "delist_date": "退市日期", "management": "基金管理人",
             }
             rows = []
             for k, v in data.items():
-                if v is None or str(v) == "nan":
+                if v is None or str(v) == "nan" or k == "manager_company":
                     continue
                 if k in ("found_date", "list_date", "delist_date") and str(v).isdigit() and len(str(v)) == 8:
                     v = f"{str(v)[:4]}-{str(v)[4:6]}-{str(v)[6:]}"
                 rows.append({"项目": label_map.get(k, k), "内容": str(v)})
             if rows:
                 lines.append(self._md(pd.DataFrame(rows)))
+            mc = data.get("manager_company")
+            if mc:
+                _mc_label = {"shortname": "简称", "setup_date": "成立日期", "employees": "员工数", "reg_capital": "注册资本(万元)", "chairman": "董事长"}
+                mc_rows = []
+                for k, v in mc.items():
+                    if v is None or str(v) == "nan":
+                        continue
+                    if k == "setup_date" and str(v).isdigit() and len(str(v)) == 8:
+                        v = f"{str(v)[:4]}-{str(v)[4:6]}-{str(v)[6:]}"
+                    mc_rows.append({"项目": _mc_label.get(k, k), "内容": str(v)})
+                if mc_rows:
+                    lines.append("\n**管理人（基金公司）**：")
+                    lines.append(self._md(pd.DataFrame(mc_rows)))
 
         elif res.title == "净值走势":
             returns = data.get("returns", {})
@@ -880,6 +1026,15 @@ class FundAnalysisRunner:
             rows = [{"区间": k, "数值": self._fmt(returns.get(k))} for k in all_keys]
             lines.append(self._md(pd.DataFrame(rows)))
             lines.append("")
+            ec = data.get("etf_check") or {}
+            if ec:
+                if ec.get("premium_discount_pct") is not None:
+                    _pd_pct = ec["premium_discount_pct"]
+                    _pd_txt = "溢价" if _pd_pct > 0 else "折价" if _pd_pct < 0 else "平价"
+                    lines.append(f"\n**ETF 折溢价**：{_pd_pct:+.2f}%（{_pd_txt}，收盘价相对单位净值；|折溢价|>1% 时注意交易成本与价格偏离风险）")
+                if ec.get("tracking_error_ann_pct") is not None:
+                    _te = ec["tracking_error_ann_pct"]
+                    lines.append(f"**跟踪误差**：年化 {_te:.2f}%（基准 {ec.get('benchmark_code')}）；宽基 ETF 年化跟踪误差通常 <1%，偏高时检查费用、抽样复制或现金拖累")
             lines.append(f"**分析评价**：最新净值 {self._fmt(data.get('latest_nav'))}，近20日 {self._fmt(returns.get('近20日涨幅%'))}%，近250日 {self._fmt(returns.get('近250日涨幅%'))}%。净值走势反映基金长期趋势，需结合波动率和回撤综合判断。")
 
         elif res.title == "业绩指标":
@@ -902,7 +1057,7 @@ class FundAnalysisRunner:
             lines.append(f"**分析评价**：{'，'.join(parts)}。")
 
         elif res.title == "同类对比":
-            own = data.get("own", {})
+            own = data.get("own") or {}
             if own:
                 rows = [{"指标": k, "数值": str(v)} for k, v in own.items()]
                 lines.append(self._md(pd.DataFrame(rows)))
@@ -944,12 +1099,22 @@ class FundAnalysisRunner:
             changes = data.get("quarterly_changes", [])
             split_note = data.get("split_note", "")
             if changes:
-                s_rows = [{"季度": c.get("quarter", "N/A"), "份额(万份)": self._fmt(c.get("fd_share"))} for c in changes]
+                s_rows = []
+                _prev = None
+                for c in changes:
+                    _row = {"季度": c.get("quarter", "N/A"), "份额(万份)": self._fmt(c.get("fd_share"))}
+                    if _prev is not None and _prev and c.get("fd_share"):
+                        _row["环比%"] = f"{(c['fd_share'] / _prev - 1) * 100:+.1f}"
+                    s_rows.append(_row)
+                    _prev = c.get("fd_share")
                 lines.append(self._md(pd.DataFrame(s_rows)))
             lines.append("")
+            if data.get("latest_scale_yi") is not None:
+                lines.append("")
+                lines.append(f"最新规模（份额×单位净值）约 {self._fmt(data.get('latest_scale_yi'))} 亿元。")
             if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
                 chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
-                lines.append(f"**分析评价**：近4季份额变化 {chg:+.2f}%{split_note}，" + ("存在赎回压力" if chg < -10 else "规模相对稳定" if abs(chg) < 10 else "资金持续流入") + "。")
+                lines.append(f"**分析评价**：近4季份额变化 {chg:+.2f}%{split_note}，" + ("存在赎回压力" if chg < -10 else "规模相对稳定" if abs(chg) < 10 else "资金持续流入") + "。份额为该基金单只口径（同标的场内外其他基金不合并），规模为份额×单位净值的近似值。")
 
         elif res.title == "分红":
             rows = [
@@ -961,7 +1126,8 @@ class FundAnalysisRunner:
                 lines.append("")
                 lines.append(f"最近一次除息日：{data['latest'].get('ex_date', 'N/A')}，每份派息 {self._fmt(data['latest'].get('div_cash'))} 元")
             lines.append("")
-            lines.append(f"**分析评价**：历史分红 {data.get('count', 0)} 次，累计 {self._fmt(data.get('total_div_cash'))} 元/份，" + ("分红频率较高，适合长期持有" if data.get("count", 0) > 10 else "分红较少") + "。")
+            _n = data.get("count", 0)
+            lines.append(f"**分析评价**：成立以来累计分红 {_n} 次、合计 {self._fmt(data.get('total_div_cash'))} 元/份" + ("，分红政策稳定（累计口径，非当期收益承诺）" if _n > 10 else "，分红次数较少") + "。")
 
         elif res.title == "风险提示":
             for r in data.get("risks", []):
@@ -972,6 +1138,22 @@ class FundAnalysisRunner:
                 lines.append("**数据缺失说明**：")
                 for n in notes:
                     lines.append(f"- {n}")
+
+        elif res.title == "动量质量":
+            rows = []
+            qm = data.get("quantitative_momentum", {})
+            if qm:
+                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"))})
+                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"))})
+                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"))})
+            am = data.get("amplitude_momentum", {})
+            if am:
+                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
+                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+            if data.get("source"):
+                rows.append({"指标": "数据源", "数值": data["source"]})
+            if rows:
+                lines.append(self._md(pd.DataFrame(rows)))
 
         return [l for l in lines if l is not None]
 

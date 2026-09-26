@@ -35,6 +35,7 @@ class DimensionResult:
     tables: List[Dict[str, Any]] = field(default_factory=list)  # 可渲染的表格列表
     risks: List[str] = field(default_factory=list)  # 该维度发现的风险信号
     note: str = ""                      # 对空结果/异常的说明
+    insights: List[str] = field(default_factory=list)  # 因子化洞察，由各维度因子计算填入
 
     def is_ok(self) -> bool:
         return self.status == ResultStatus.SUCCESS
@@ -48,6 +49,7 @@ class DimensionResult:
             "tables": self.tables,
             "risks": self.risks,
             "note": self.note,
+            "insights": self.insights,
         }
 
     @classmethod
@@ -59,6 +61,7 @@ class DimensionResult:
         tables: Optional[List[Dict[str, Any]]] = None,
         risks: Optional[List[str]] = None,
         note: str = "",
+        insights: Optional[List[str]] = None,
     ) -> "DimensionResult":
         return cls(
             status=ResultStatus.SUCCESS,
@@ -68,6 +71,7 @@ class DimensionResult:
             tables=tables or [],
             risks=risks or [],
             note=note,
+            insights=insights or [],
         )
 
     @classmethod

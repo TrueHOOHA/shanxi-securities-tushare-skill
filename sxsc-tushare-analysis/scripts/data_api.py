@@ -174,9 +174,16 @@ class DataAPI:
 
     # ---------- A 股基础 ----------
 
-    def get_stock_basic(self, ts_code: str, fields: Optional[str] = None) -> Optional[pd.DataFrame]:
+    def get_stock_basic(self, ts_code: Optional[str] = None, fields: Optional[str] = None,
+                        list_status: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """个股或全市场基础信息；ts_code/list_status 均可选（指数成分行业匹配用全市场查询）。"""
         f = fields or "ts_code,symbol,name,area,industry,list_date,exchange,list_status"
-        return self._call("stock_basic", {"ts_code": ts_code}, f)
+        params: Dict[str, Any] = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if list_status:
+            params["list_status"] = list_status
+        return self._call("stock_basic", params, f)
 
     def get_stock_company(self, ts_code: str, fields: Optional[str] = None) -> Optional[pd.DataFrame]:
         f = fields or "ts_code,employees,main_business,reg_capital,province,city"
@@ -250,6 +257,12 @@ class DataAPI:
         return self._call("margin_detail", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
                           "ts_code,trade_date,rzye,rzmre,rqyl,rzrqye")
 
+    def get_margin_secs(self, ts_code: str, end_date: str, lookback_days: int = 30) -> Optional[pd.DataFrame]:
+        """融资融券标的名单（盘前更新）：用于判断标的是否为两融标的。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("margin_secs", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,name,exchange")
+
     # ---------- 市场异动 ----------
 
     def get_top_list(self, trade_date: str) -> Optional[pd.DataFrame]:
@@ -273,6 +286,46 @@ class DataAPI:
         return self._call("top_inst", {"trade_date": trade_date},
                           "trade_date,ts_code,name,b_amount,s_amount,net_amount,reason")
 
+
+    def get_stk_shock(self, ts_code: str, end_date: str, lookback_days: int = 250) -> Optional[pd.DataFrame]:
+        """个股异常波动记录。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("stk_shock", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,trade_date,name,trade_market,reason,period")
+
+    def get_stk_high_shock(self, ts_code: str, end_date: str, lookback_days: int = 250) -> Optional[pd.DataFrame]:
+        """个股严重异常波动记录。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("stk_high_shock", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,trade_date,name,trade_market,reason,period")
+
+    def get_stk_alert(self, ts_code: str, end_date: str, lookback_days: int = 250) -> Optional[pd.DataFrame]:
+        """交易所重点提示证券（风险警示类）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("stk_alert", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,name,start_date,end_date,type")
+
+    def get_stk_limit(self, ts_code: str, end_date: str, lookback_days: int = 10) -> Optional[pd.DataFrame]:
+        """每日涨跌停价格。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("stk_limit", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,pre_close,up_limit,down_limit")
+
+    def get_hm_detail(self, ts_code: str, end_date: str, lookback_days: int = 120) -> Optional[pd.DataFrame]:
+        """游资每日明细（buy/sell/net_amount 单位：元）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("hm_detail", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,ts_name,buy_amount,sell_amount,net_amount,hm_name,hm_orgs,tag")
+
+    def get_hm_list(self) -> Optional[pd.DataFrame]:
+        """游资名录（名称+简介）。"""
+        return self._call("hm_list", {}, "name,desc")
+
+    def get_suspend_d(self, ts_code: str, end_date: str, lookback_days: int = 60) -> Optional[pd.DataFrame]:
+        """每日停复牌信息（suspend_type: S-停牌 R-复牌）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("suspend_d", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,trade_date,suspend_timing,suspend_type")
     # ---------- 宏观数据 ----------
 
     def get_cn_cpi(self, start_m: str, end_m: str) -> Optional[pd.DataFrame]:
@@ -291,10 +344,20 @@ class DataAPI:
         return self._call("cn_gdp", {"start_q": start_quarter, "end_q": end_quarter},
                           "quarter,gdp,gdp_yoy,pi,si,ti")
 
+    def get_cn_m(self, start_m: str, end_m: str) -> Optional[pd.DataFrame]:
+        """货币供应量（M0/M1/M2 月度同比）。"""
+        return self._call("cn_m", {"start_m": start_m, "end_m": end_m},
+                          "month,m0,m0_yoy,m1,m1_yoy,m2,m2_yoy")
+
+    def get_shibor(self, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """Shibor 利率（on/1w/1m/3m/6m/1y，单位 %）。"""
+        return self._call("shibor", {"start_date": start_date, "end_date": end_date},
+                          "date,on,1w,1m,3m,6m,1y")
+
     # ---------- 基金 ----------
 
     def get_fund_basic(self, ts_code: str, fields: Optional[str] = None) -> Optional[pd.DataFrame]:
-        f = fields or "ts_code,name,fund_type,found_date,list_date,delist_date"
+        f = fields or "ts_code,name,management,custodian,fund_type,found_date,list_date,delist_date,m_fee,c_fee,benchmark,invest_type"
         return self._call("fund_basic", {"ts_code": ts_code}, f)
 
     def get_fund_nav(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
@@ -328,6 +391,11 @@ class DataAPI:
         return self._call("fund_div", {"ts_code": ts_code},
                           "ts_code,ann_date,ex_date,record_date,pay_date,div_cash")
 
+
+    def get_fund_company(self) -> Optional[pd.DataFrame]:
+        """公募基金管理人（接口无入参，返回全量，调用方按管理人名称过滤）。"""
+        return self._call("fund_company", {},
+                          "name,shortname,province,city,chairman,manager,reg_capital,setup_date,employees,main_business,website")
     # ---------- 指数 ----------
 
     def get_index_basic(self, ts_code: str, fields: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -347,6 +415,11 @@ class DataAPI:
                           "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg")
         return drop_t0_placeholder(df, ["close"])
 
+    def get_index_dailybasic(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """大盘指数每日指标（指数级 PE/PB/市值）。不覆盖部分指数（如科创50），空结果由调用方降级。"""
+        return self._call("index_dailybasic", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,trade_date,pe,pb,total_mv")
+
     def get_trade_cal(self, exchange: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         return self._call("trade_cal", {"exchange": exchange, "start_date": start_date, "end_date": end_date},
                           "exchange,cal_date,is_open,pretrade_date")
@@ -363,12 +436,71 @@ class DataAPI:
         return self._call("top10_floatholders", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
                           "ts_code,ann_date,end_date,holder_name,hold_amount,hold_ratio,hold_float_ratio,hold_change,holder_type")
 
+    def get_pledge_stat(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """股权质押统计数据（历史序列，取最新期作为当前质押比例）。"""
+        return self._call("pledge_stat", {"ts_code": ts_code},
+                          "ts_code,end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio")
+
+    def get_pledge_detail(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """股权质押明细。"""
+        return self._call("pledge_detail", {"ts_code": ts_code},
+                          "ts_code,ann_date,holder_name,pledge_amount,start_date,end_date,is_release,pledgor,p_total_ratio,h_total_ratio")
+
+    def get_stk_managers(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """上市公司管理层（注：接口实际不返回 end_date，无法区分在任/离任，计数口径为全部披露记录）。"""
+        return self._call("stk_managers", {"ts_code": ts_code},
+                          "ts_code,ann_date,name,gender,lev,title,edu,national")
+
+    def get_stk_rewards(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """管理层薪酬和持股（按报告期）。"""
+        return self._call("stk_rewards", {"ts_code": ts_code},
+                          "ts_code,ann_date,end_date,name,title,reward,hold_vol")
+
+    def get_namechange(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """股票曾用名。"""
+        return self._call("namechange", {"ts_code": ts_code},
+                          "ts_code,name,start_date,end_date,ann_date,change_reason")
+
+    def get_new_share(self, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """IPO新股列表（按上网发行日期区间取全市场，调用方本地过滤标的）。"""
+        return self._call("new_share", {"start_date": start_date, "end_date": end_date},
+                          "ts_code,name,ipo_date,issue_date,amount,market_amount,price,pe,limit_amount")
+
     # ---------- 大宗交易 ----------
 
     def get_block_trade(self, ts_code: str, end_date: str, lookback_days: int = 60) -> Optional[pd.DataFrame]:
         start_date = shift_date(end_date, -lookback_days)
         return self._call("block_trade", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
                           "ts_code,trade_date,price,vol,amount,buyer,seller")
+
+    def get_repurchase(self, ts_code: str, end_date: str, lookback_days: int = 365) -> Optional[pd.DataFrame]:
+        """股票回购。接口无 ts_code 入参，按公告日期区间取全市场后本地过滤；vol 万股、amount 万元。"""
+        start_date = shift_date(end_date, -lookback_days)
+        df = self._call("repurchase", {"start_date": start_date, "end_date": end_date},
+                        "ts_code,ann_date,end_date,proc,exp_date,vol,amount,high_limit,low_limit")
+        if df is None or df.empty or "ts_code" not in df.columns:
+            return None
+        return df[df["ts_code"] == ts_code].reset_index(drop=True)
+
+    def get_hsgt_top10(self, ts_code: str, end_date: str, lookback_days: int = 60) -> Optional[pd.DataFrame]:
+        """沪深股通十大成交股上榜记录（amount/net_amount 单位：元）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("hsgt_top10", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,name,close,change,rank,market_type,amount,net_amount,buy,sell")
+
+    def get_broker_recommend(self, month: str) -> Optional[pd.DataFrame]:
+        """券商月度金股（month=YYYYMM 为必选入参）；调用方按月循环后本地过滤标的。"""
+        return self._call("broker_recommend", {"month": month}, "month,broker,ts_code,name")
+
+    def get_daily_info(self, start_date: str, end_date: str, ts_code: str = "SH_A") -> Optional[pd.DataFrame]:
+        """市场交易统计（板块口径，SH_A=上海A股）；amount 亿元、vol 亿股、pe 平均市盈率、tr 换手率%。"""
+        return self._call("daily_info", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,ts_name,com_count,amount,vol,trans_count,pe,tr")
+
+    def get_sz_daily_info(self, start_date: str, end_date: str, ts_code: str = "股票") -> Optional[pd.DataFrame]:
+        """深圳市场每日交易情况（板块代码为中文，"股票"=深市股票总和）；amount 单位为元（换算亿元需 /1e8，与 daily_info 的亿元口径不同）。"""
+        return self._call("sz_daily_info", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "trade_date,ts_code,count,amount,vol,total_mv")
 
     # ---------- 全市场两融汇总 ----------
 
@@ -393,6 +525,34 @@ class DataAPI:
         start_date = shift_date(end_date, -lookback_days)
         return self._call("balancesheet", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
                           "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,total_share")
+
+    def get_express(self, ts_code: str, end_date: str, lookback_days: int = 400) -> Optional[pd.DataFrame]:
+        """业绩快报（比定期报告更早披露）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("express", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,ann_date,end_date,revenue,n_income,yoy_sales,yoy_dedu_np,diluted_eps,diluted_roe")
+
+    def get_fina_audit(self, ts_code: str, end_date: str, lookback_days: int = 800) -> Optional[pd.DataFrame]:
+        """财务审计意见（年报口径）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("fina_audit", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+                          "ts_code,ann_date,end_date,audit_result,audit_agency")
+
+    def get_fina_mainbz(self, ts_code: str, end_date: str, lookback_days: int = 800) -> Optional[pd.DataFrame]:
+        """主营业务构成（type=P 按产品）。"""
+        start_date = shift_date(end_date, -lookback_days)
+        return self._call("fina_mainbz", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date, "type": "P"},
+                          "ts_code,end_date,bz_item,bz_sales,bz_profit,curr_type")
+
+    def get_disclosure_date(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """财报披露计划（含未来预定披露日 pre_date）。"""
+        return self._call("disclosure_date", {"ts_code": ts_code},
+                          "ts_code,ann_date,end_date,pre_date,actual_date")
+
+    def get_dividend(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """分红送股（cash_div_tax 每股税前分红、stk_div 每股送转；div_proc 含 实施/预案 等阶段）。"""
+        return self._call("dividend", {"ts_code": ts_code},
+                          "ts_code,end_date,ann_date,div_proc,stk_div,cash_div,cash_div_tax,record_date,ex_date,pay_date,base_share")
 
     # ---------- 行业分类 ----------
 

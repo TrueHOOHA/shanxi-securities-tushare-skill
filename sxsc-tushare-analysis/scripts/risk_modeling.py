@@ -49,7 +49,11 @@ def calc_tail_risk(returns):
         "偏度": skew,
         "峰度(超额)": kurt,
         "interpretation": f"{'左偏' if skew < 0 else '右偏'}，{'厚尾' if kurt > 0 else '薄尾'}（正态=0）",
-        "risk": "尾部风险高" if (skew < -0.5 and kurt > 0) else "尾部风险适中",
+        "risk": (
+            "尾部风险高（左偏厚尾，极端亏损风险大）" if (skew < -0.5 and kurt > 0)
+            else "右偏厚尾（极端波动大，上行尾部更厚）" if (skew > 0.5 and kurt > 3)
+            else "尾部风险适中"
+        ),
     }
 
 

@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from basic_metrics import calc_ma, calc_max_drawdown, calc_returns, calc_sharpe, calc_volatility
 from data_api import DataAPI, shift_date
+from factor_signals import calc_amplitude_momentum, calc_quantitative_momentum
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
 
@@ -47,7 +48,7 @@ class IndexAnalysisRunner:
     """指数综合分析 Runner。"""
 
     PERIODS = (5, 20, 60, 120, 250)
-    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "weight", "sector", "global", "margin", "risk"]
+    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "weight", "sector", "global", "margin", "momentum_quality", "risk"]
 
     def __init__(
         self,
@@ -147,16 +148,19 @@ class IndexAnalysisRunner:
         # index_dailybasic 对部分指数（如科创50）不可用
         # 取近 5 年估值序列（~1250 自然日），不足时按实际返回量降级标注
         start = shift_date(self.end_date, -250 * 5)
-        df = self.api._call("index_dailybasic", {"ts_code": self.ts_code, "start_date": start, "end_date": self.end_date},
-                            "ts_code,trade_date,pe,pb,total_mv")
+        df = self.api.get_index_dailybasic(self.ts_code, start, self.end_date)
         if df is None or df.empty:
             # 不做聚合估算：无 index_dailybasic 官方指数级估值数据即判 empty，不编造数据
             return DimensionResult.empty("估值分析", note="该指数暂无指数级估值数据（index_dailybasic 未覆盖）")
 
         df = df.sort_values("trade_date").reset_index(drop=True)
         latest = df.iloc[-1]
-        pe = _safe_float(latest.get("pe"))
-        pb = _safe_float(latest.get("pb"))
+        pe_raw = _safe_float(latest.get("pe"))
+        pe = round(pe_raw, 2) if pe_raw is not None else None
+        pb_raw = _safe_float(latest.get("pb"))
+        pb = round(pb_raw, 2) if pb_raw is not None else None
+        total_mv = _safe_float(latest.get("total_mv"))
+        total_mv_yi = round(total_mv / 1e8, 0) if total_mv is not None else None  # index_dailybasic.total_mv 单位为元
         hist_count = len(df)
 
         # 历史分位需 ≥250 日数据才统计可靠；不足则置 None 并标注
@@ -169,7 +173,7 @@ class IndexAnalysisRunner:
                 pb_hist = round((df["pb"] < pb).sum() / len(df) * 100, 1)
         hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
 
-        data = {"pe": pe, "pb": pb, "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist, "hist_sample_days": hist_count}
+        data = {"pe": pe, "pb": pb, "total_mv_yi": total_mv_yi, "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist, "hist_sample_days": hist_count}
         data["chart"] = {
             "title": "近5年 PE/PB 走势",
             "type": "line",
@@ -208,7 +212,7 @@ class IndexAnalysisRunner:
         all_codes = ", ".join(latest["con_code"].tolist())
         name_map = {}
         try:
-            sb = self.api._call("stock_basic", {"ts_code": all_codes}, "ts_code,name")
+            sb = self.api.get_stock_basic(all_codes, fields="ts_code,name")
             if sb is not None and not sb.empty:
                 name_map = dict(zip(sb["ts_code"], sb["name"]))
         except Exception:
@@ -218,7 +222,7 @@ class IndexAnalysisRunner:
             if code not in name_map:
                 import time; time.sleep(0.3)
                 try:
-                    sb = self.api._call("stock_basic", {"ts_code": code}, "ts_code,name")
+                    sb = self.api.get_stock_basic(code, fields="ts_code,name")
                     if sb is not None and not sb.empty:
                         name_map[code] = sb.iloc[0].get("name", "")
                 except Exception:
@@ -252,7 +256,7 @@ class IndexAnalysisRunner:
         # 一次性查全市场 stock_basic（含 industry 字段），本地匹配成分股行业，避免逐只查被限流
         ind_map = {}
         try:
-            all_basic = self.api._call("stock_basic", {"list_status": "L"}, "ts_code,name,industry")
+            all_basic = self.api.get_stock_basic(list_status="L", fields="ts_code,name,industry")
             if all_basic is not None and not all_basic.empty:
                 ind_map = dict(zip(all_basic["ts_code"], all_basic["industry"]))
         except Exception:
@@ -265,7 +269,14 @@ class IndexAnalysisRunner:
         ind_df = pd.DataFrame(industries)
         sector_dist = ind_df["industry"].value_counts().head(10).reset_index()
         sector_dist.columns = ["行业", "成分股数量"]
-        sector_dist["占比%"] = round(sector_dist["成分股数量"] / len(ind_df) * 100, 2)
+        sector_dist["家数占比%"] = round(sector_dist["成分股数量"] / len(ind_df) * 100, 2)
+        # 权重口径：最新一期成分权重按行业聚合（资金分布视角，与家数口径并列）
+        latest_w = df_w.sort_values("trade_date").groupby("con_code").tail(1)[["con_code", "weight"]]
+        ind_w = latest_w.merge(ind_df, left_on="con_code", right_on="ts_code", how="left")
+        w_dist = ind_w.groupby("industry")["weight"].sum().sort_values(ascending=False).reset_index()
+        w_dist.columns = ["行业", "权重占比%"]
+        w_dist["权重占比%"] = w_dist["权重占比%"].round(2)
+        sector_dist = sector_dist.merge(w_dist, on="行业", how="left")
 
         matched_count = int((ind_df["industry"] != "未知").sum())
         data = {"distribution": sector_dist.to_dict("records"), "total_members": len(codes), "matched": matched_count}
@@ -278,7 +289,7 @@ class IndexAnalysisRunner:
     def analyze_global(self) -> DimensionResult:
         # 仅对 A 股主要指数做国际对比
         peers = {
-            "000300.SH": [("SPX", "标普500"), ("DJI", "道琼斯"), ("HSI", "恒生指数")],
+            "000300.SH": [("SPX", "标普500"), ("IXIC", "纳斯达克"), ("DJI", "道琼斯"), ("HSI", "恒生指数")],
             "000001.SH": [("SPX", "标普500"), ("DJI", "道琼斯"), ("HSI", "恒生指数")],
             "399001.SZ": [("IXIC", "纳斯达克"), ("HSI", "恒生指数")],
             "399006.SZ": [("IXIC", "纳斯达克"), ("SPX", "标普500"), ("HSI", "恒生指数")],
@@ -389,6 +400,35 @@ class IndexAnalysisRunner:
         conclusion = "，".join(parts)
         return DimensionResult.success("两融/市场杠杆", conclusion=conclusion, data=data)
 
+    # ---------- 维度：动量质量（因子化） ----------
+
+    @safe_result("动量质量")
+    def analyze_momentum_quality(self) -> DimensionResult:
+        start = shift_date(self.end_date, -max(self.PERIODS) * 2)
+        df = self.api.get_index_daily(self.ts_code, start, self.end_date)
+        if df is None or df.empty:
+            return DimensionResult.empty("动量质量", note="无法获取指数行情")
+        df = df.set_index("trade_date").sort_index()
+        price = df["close"]
+        high = df["high"] if "high" in df.columns else price
+        low = df["low"] if "low" in df.columns else price
+        if len(price) < 121:
+            return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
+
+        qm = calc_quantitative_momentum(price, window=60)
+        am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3)
+        data = {"quantitative_momentum": qm, "amplitude_momentum": am}
+        conclusion = "动量质量因子分析。"
+        insights = []
+        if qm:
+            insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
+        if am:
+            insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+        if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
+            insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
+        return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
+
+
     # ---------- 维度：风险提示 ----------
 
     def analyze_risk(self) -> DimensionResult:
@@ -408,9 +448,9 @@ class IndexAnalysisRunner:
         if valuation and valuation.is_ok() and valuation.data:
             pe_hist = valuation.data.get("pe_hist_percentile")
             pb_hist = valuation.data.get("pb_hist_percentile")
-            if isinstance(pe_hist, (int, float)) and pe_hist > 80:
+            if isinstance(pe_hist, (int, float)) and pe_hist > 70:
                 risks.append(f"PE 历史分位 {pe_hist}%，估值偏高")
-            if isinstance(pb_hist, (int, float)) and pb_hist > 80:
+            if isinstance(pb_hist, (int, float)) and pb_hist > 70:
                 risks.append(f"PB 历史分位 {pb_hist}%，估值偏高")
 
         if not risks:
@@ -440,6 +480,7 @@ class IndexAnalysisRunner:
             "sector": self.analyze_sector,
             "global": self.analyze_global,
             "margin": self.analyze_margin,
+            "momentum_quality": self.analyze_momentum_quality,
         }
         to_run = {d: dim_methods[d] for d in parallel_dims if d in dim_methods}
         if to_run:
@@ -505,7 +546,7 @@ class IndexAnalysisRunner:
         for col in df.columns:
             if df[col].dtype.kind in "iufc":
                 df[col] = df[col].apply(lambda x: self._fmt(x))
-            elif df[col].dtype == object:
+            else:  # 兜底：pandas 3.x 新 str dtype 不属于 object，也需清洗 NaN
                 df[col] = df[col].apply(
                     lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                     else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x))
@@ -520,6 +561,7 @@ class IndexAnalysisRunner:
         "sector": "行业分布",
         "global": "国际对比",
         "margin": "两融/市场杠杆",
+        "momentum_quality": "动量质量",
         "risk": "风险提示",
     }
 
@@ -573,6 +615,11 @@ class IndexAnalysisRunner:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
                 lines.extend(self._render_dimension(res))
+                if res.insights:
+                    lines.append("")
+                    lines.append("**因子洞察**：")
+                    for _ins in res.insights:
+                        lines.append(f"- {_ins}")
             elif res.note:
                 lines.append(f"- {res.note}")
             lines.append("")
@@ -622,7 +669,7 @@ class IndexAnalysisRunner:
         if val_ok:
             pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
             pb_hist = self._f(self._v(valuation.data, "pb_hist_percentile"))
-            if pe_hist is not None and pe_hist > 80:
+            if pe_hist is not None and pe_hist > 70:
                 tags.append("估值偏高")
             elif pe_hist is not None and pe_hist < 20:
                 tags.append("估值偏低")
@@ -676,7 +723,7 @@ class IndexAnalysisRunner:
             szse = margin.data.get("szse") or {}
             sse_rzye = self._fmt(self._v(sse, "latest_rzye_billion"))
             szse_rzye = self._fmt(self._v(szse, "latest_rzye_billion"))
-            points.append(f"- **杠杆**：SSE融资余额 {sse_rzye}亿，SZSE融资余额 {szse_rzye}亿")
+            points.append(f"- **杠杆**：上交所融资余额 {sse_rzye}亿，深交所融资余额 {szse_rzye}亿")
 
         if points:
             lines.append("")
@@ -686,14 +733,14 @@ class IndexAnalysisRunner:
         style_parts = []
         if val_ok:
             pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            if pe_hist is not None and pe_hist > 80:
+            if pe_hist is not None and pe_hist > 70:
                 style_parts.append("高估值")
             elif pe_hist is not None and pe_hist < 20:
                 style_parts.append("低估值")
         if trend_ok:
             vol = self._f(self._v(trend.data, "volatility"))
             beta_approx = self._f(self._v(trend.data, "returns", "近250日涨幅%"))
-            bench250 = self._f(self._v(trend.data.get("benchmark", {}), "returns", "近250日涨幅%"))
+            bench250 = self._f(self._v(trend.data.get("benchmark") or {}, "returns", "近250日涨幅%"))
             if vol is not None and vol > 30:
                 style_parts.append("高波动/成长型")
             elif vol is not None and vol < 15:
@@ -715,7 +762,7 @@ class IndexAnalysisRunner:
         concl_parts = []
         if val_ok:
             pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            if pe_hist is not None and pe_hist > 80:
+            if pe_hist is not None and pe_hist > 70:
                 concl_parts.append("估值处于历史高位，需警惕回调风险")
             elif pe_hist is not None and pe_hist < 20:
                 concl_parts.append("估值处于历史低位，具备一定安全边际")
@@ -833,8 +880,12 @@ class IndexAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(dist)))
                 lines.append("")
                 top3 = [d.get("行业", "") for d in dist[:3]]
-                top1_pct = dist[0].get("占比%", "N/A") if dist else "N/A"
-                lines.append(f"**分析评价**：前三大行业为{'、'.join(top3)}，第一大行业占比 {top1_pct}%。" + ("行业集中度较高，指数走势受少数行业影响显著。" if self._f(top1_pct) and self._f(top1_pct) > 20 else "行业分布相对分散。"))
+                top1_name = dist[0].get("行业", "") if dist else ""
+                top1_cnt = dist[0].get("家数占比%", "N/A")
+                top1_w = dist[0].get("权重占比%", "N/A")
+                _wd_txt = f"（家数占比 {top1_cnt}%，权重占比 {top1_w}%）" if top1_w != "N/A" else f"（家数占比 {top1_cnt}%）"
+                _conc_basis = self._f(top1_w) if top1_w != "N/A" else self._f(top1_cnt)
+                lines.append(f"**分析评价**：前三大行业为{'、'.join(top3)}，第一大行业（{top1_name}）{_wd_txt}。" + ("权重口径集中度较高，指数走势受少数行业影响显著。" if _conc_basis is not None and _conc_basis > 20 else "权重口径下行业分布相对分散。"))
             else:
                 lines.append("- 无法获取指数成分股")
 
@@ -863,7 +914,7 @@ class IndexAnalysisRunner:
                         elif idx_entry[1] == worst[1]:
                             eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标的中表现最弱。"
                         else:
-                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，介于{best[0]}({best[1]}%)与{worst[0]}({worst[1]}%)之间。"
+                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，介于{best[0]}({best[1]}%)与{worst[0]}({worst[1]}%)之间，较最强标的落后 {round(best[1] - idx_entry[1], 1)} 个百分点，处于对比样本第 {len(eval_parts) - [x[0] for x in eval_parts].index(idx_name)}/{len(eval_parts)} 位。"
                         lines.append(f"**分析评价**：{eval_text}")
             else:
                 lines.append("- 未配置该指数的国际对比标的")
@@ -874,7 +925,7 @@ class IndexAnalysisRunner:
                 s = data.get(ex)
                 if s:
                     table_rows.append({
-                        "交易所": ex.upper(),
+                        "交易所": {"SSE": "上交所", "SZSE": "深交所"}.get(ex.upper(), ex.upper()),
                         "融资余额(亿)": self._fmt(s.get("latest_rzye_billion")),
                         "融资融券余额(亿)": self._fmt(s.get("latest_rzrqye_billion")),
                         "区间变化%": self._fmt(s.get("rzye_chg_pct")),
@@ -893,6 +944,20 @@ class IndexAnalysisRunner:
                 lines.append("**数据缺失说明**：")
                 for n in notes:
                     lines.append(f"- {n}")
+
+        elif res.title == "动量质量":
+            rows = []
+            qm = data.get("quantitative_momentum", {})
+            if qm:
+                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"))})
+                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"))})
+                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"))})
+            am = data.get("amplitude_momentum", {})
+            if am:
+                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"))})
+                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"))})
+            if rows:
+                lines.append(self._md(pd.DataFrame(rows)))
 
         return [l for l in lines if l is not None]
 
@@ -937,6 +1002,8 @@ class IndexAnalysisRunner:
         if pe_hist is not None:
             if pe_hist > 80:
                 parts.append(f"PE历史分位 {pe_hist}%，估值偏高。")
+            elif pe_hist > 70:
+                parts.append(f"PE历史分位 {pe_hist}%，估值中高（需盈利增速消化估值）。")
             elif pe_hist < 20:
                 parts.append(f"PE历史分位 {pe_hist}%，处于历史低位。")
                 if pe is not None and pe > 30:
@@ -946,6 +1013,8 @@ class IndexAnalysisRunner:
         if pb_hist is not None:
             if pb_hist > 80:
                 parts.append(f"PB历史分位 {pb_hist}%，偏高。")
+            elif pb_hist > 70:
+                parts.append(f"PB历史分位 {pb_hist}%，中高。")
             elif pb_hist < 20:
                 parts.append(f"PB历史分位 {pb_hist}%，偏低。")
             else:

@@ -109,7 +109,8 @@ class FutAnalysisRunner:
         # 主力合约具体参数
         cont_detail = None
         if self.main_contract:
-            tmp = self.api.get_fut_basic(ts_code=self.main_contract)
+            # fut_basic 需同时传 exchange（仅 ts_code 返回空）
+            tmp = self.api.get_fut_basic(ts_code=self.main_contract, exchange=self.exchange)
             if tmp is not None and not tmp.empty:
                 cont_detail = tmp.iloc[0]
 
@@ -121,9 +122,10 @@ class FutAnalysisRunner:
             {"项目": "当前主力合约", "内容": self.main_contract or "N/A"},
         ]
         if cont_detail is not None:
-            for k, label in [("multiplier", "合约乘数"), ("trade_unit", "交易单位"),
-                             ("min_unit", "最小变动价位"), ("quote_unit", "报价单位"),
-                             ("list_date", "上市日期"), ("last_ddate", "最后交易日")]:
+            # 字段名以实际接口为准：per_unit(每手)/trade_unit(计量单位)/quote_unit_desc(最小报价说明)
+            for k, label in [("per_unit", "交易单位(每手)"), ("trade_unit", "交易计量单位"),
+                             ("multiplier", "合约乘数(国债/指数期货)"), ("quote_unit_desc", "最小报价单位说明"),
+                             ("d_month", "交割月份"), ("last_ddate", "最后交割日")]:
                 v = cont_detail.get(k)
                 if v is not None and str(v) != "nan":
                     rows.append({"项目": label, "内容": v})
@@ -187,7 +189,18 @@ class FutAnalysisRunner:
                 d = daily.sort_values("trade_date").dropna(subset=["oi"])
                 if not d.empty:
                     oi_series = d.set_index("trade_date")["oi"].tail(30)
-            return DimensionResult.success("持仓分析", conclusion=note, data={"holding_records": None, "oi_series": (oi_series.tail(10).to_dict() if oi_series is not None else None)})
+            # 量仓比（成交量/持仓量）与近5日持仓变化
+            vr_latest = oi_chg5 = None
+            if daily is not None and not daily.empty and "oi" in daily.columns and "vol" in daily.columns:
+                d2 = daily.sort_values("trade_date").dropna(subset=["oi"])
+                if len(d2) >= 6:
+                    _last = d2.iloc[-1]
+                    vr_latest = round(float(_last["vol"] / _last["oi"]), 4) if _last["oi"] else None
+                    oi_chg5 = round((float(_last["oi"]) / float(d2.iloc[-6]["oi"]) - 1) * 100, 2) if d2.iloc[-6]["oi"] else None
+            _vr_txt = f"。近5日持仓量变化 {oi_chg5:+.2f}%，最新量仓比(成交量/持仓量) {vr_latest}" if vr_latest is not None else ""
+            note = note.rstrip("。") + _vr_txt + ("。" if _vr_txt else "")
+
+            return DimensionResult.success("持仓分析", conclusion=note, data={"holding_records": None, "oi_series": (oi_series.tail(10).to_dict() if oi_series is not None else None), "vr_latest": vr_latest, "oi_chg5": oi_chg5})
         holding_df = holding_df.sort_values("trade_date") if "trade_date" in holding_df.columns else holding_df
         data = {"holding_records": holding_df.tail(20).to_dict("records"), "covered_exchange": True}
         return DimensionResult.success("持仓分析", data=data,
@@ -217,7 +230,7 @@ class FutAnalysisRunner:
             if w is not None and not w.empty and "symbol" in w.columns:
                 sr = w[w["symbol"] == self.symbol]
                 if not sr.empty and "vol" in sr.columns:
-                    rows.append({"trade_date": d, "仓库_count": int(len(sr)), "vol": int(sr["vol"].sum())})
+                    rows.append({"trade_date": d, "覆盖仓库数": int(len(sr)), "vol": int(sr["vol"].sum())})
         if not rows:
             return DimensionResult.empty("仓单库存", note="无法获取仓单数据")
         wdf = pd.DataFrame(rows).sort_values("trade_date")
@@ -237,7 +250,8 @@ class FutAnalysisRunner:
         if fs is not None and not fs.empty:
             if "settle" in fs.columns:
                 fs = fs.sort_values("trade_date").dropna(subset=["settle"])
-            data = {"settle_records": fs.tail(5).to_dict("records"), "source": "fut_settle"}
+            _lmr = _safe_float(fs.iloc[-1].get("long_margin_rate")) if "long_margin_rate" in fs.columns else None
+            data = {"settle_records": fs.tail(5).to_dict("records"), "source": "fut_settle", "latest_margin_rate": _lmr}
             conclusion = f"结算参数来自 fut_settle（{code}），最新 {len(fs)} 条。"
             return DimensionResult.success("结算参数", conclusion=conclusion, data=data)
         # 降级：从日线取结算价
@@ -272,7 +286,9 @@ class FutAnalysisRunner:
                     risks.append(f"RSI {rsi_v} 超买，短期或有回调")
                 elif rsi_v < 30:
                     risks.append(f"RSI {rsi_v} 超卖，短期或有反弹")
-        risks.append("期货为保证金交易，杠杆放大盈亏")
+        _settle_res = self.results.get("settle")
+        _mr_v = self._f((_settle_res.data or {}).get("latest_margin_rate")) if _settle_res and _settle_res.is_ok() else None
+        risks.append("期货为保证金交易" + (f"（最新保证金率 {_mr_v*100:.0f}%，名义杠杆约 {1/_mr_v:.1f} 倍）" if _mr_v and _mr_v > 0 else "，杠杆放大盈亏") + "，需严格执行仓位与止损管理")
         risks.append("主力连续合约有换月跳空，技术指标可能失真")
         # 数据缺失
         notes = []
@@ -344,7 +360,7 @@ class FutAnalysisRunner:
         for col in df.columns:
             if df[col].dtype.kind in "iufc":
                 df[col] = df[col].apply(lambda x: self._fmt(x))
-            elif df[col].dtype == object:
+            else:  # 兜底：pandas 3.x 新 str dtype 不属于 object，也需清洗 NaN
                 df[col] = df[col].apply(lambda x: self._fmt(x) if isinstance(x, (int, float, np.integer, np.floating))
                                         else ("N/A" if x is None or (isinstance(x, float) and x != x) else str(x)))
         try:
@@ -449,7 +465,8 @@ class FutAnalysisRunner:
         elif res.title == "仓单库存":
             ws = data.get("wsr_series", [])
             if ws:
-                lines.append(self._md(pd.DataFrame(ws)))
+                _ws_df = pd.DataFrame(ws).rename(columns={"trade_date": "日期", "vol": "仓单量(张)"})
+                lines.append(self._md(_ws_df))
                 lines.append("")
             lines.append(f"**分析评价**：仓单反映可交割量，{data.get('trend','')}。仓单增加压制价格(偏空)，减少支撑价格(偏多)。")
         elif res.title == "结算参数":
@@ -457,7 +474,14 @@ class FutAnalysisRunner:
             if src.startswith("fut_settle"):
                 rec = data.get("settle_records", [])
                 if rec:
-                    lines.append(self._md(pd.DataFrame(rec)))
+                    _keep = [c for c in ["trade_date", "settle", "long_margin_rate", "short_margin_rate"] if c in rec[0]]
+                    _recs = [{"日期": r.get("trade_date"), "结算价": self._fmt(r.get("settle")),
+                              "多头保证金率": self._fmt(r.get("long_margin_rate")), "空头保证金率": self._fmt(r.get("short_margin_rate"))} for r in rec]
+                    lines.append(self._md(pd.DataFrame(_recs)))
+                    _mr = self._f(_recs[-1].get("多头保证金率")) if _recs else None
+                    if _mr and _mr > 0:
+                        lines.append("")
+                        lines.append(f"最新保证金率 {_mr*100:.0f}% → 名义杠杆约 {1/_mr:.1f} 倍（保证金交易，盈亏同步放大）。")
                     lines.append("")
             lines.append("**分析评价**：结算价是每日无负债结算基准，影响保证金占用与盈亏。保证金率需交易所公告，连续合约暂以日线结算价近似。")
         return [l for l in lines if l is not None]
@@ -502,7 +526,7 @@ class FutAnalysisRunner:
             _ws = wsr.data.get("wsr_series") or []
             _latest_ws_vol = _ws[-1].get("vol", "N/A") if _ws else "N/A"
             pts.append(f"- **仓单**：最新 {_latest_ws_vol} 张，{wsr.data.get('trend','')}")
-        pts.append("- **数据缺失**：持仓排名(非DCE交易所)、基差(无现货)、fut_settle连续合约")
+        pts.append("- **数据口径**：持仓排名接口仅覆盖大商所（本品种已降级为持仓量序列）；基差需现货价（本数据源无现货接口）；结算参数取自当前主力具体合约")
         lines.extend(pts)
         lines.append("")
         lines.append(f"**风格定位**：{name}属期货品种，受供需、季节性、宏观与政策等多因素影响，杠杆交易放大波动。")

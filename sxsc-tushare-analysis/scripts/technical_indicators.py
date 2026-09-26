@@ -71,7 +71,7 @@ def calc_kdj(df_high, df_low, df_close, period=9):
         "D": round(float(d.iloc[-1]), 2),
         "J": round(float(j.iloc[-1]), 2),
         "signal": "金叉" if k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2] else
-                  ("死叉" if k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2] else "无叉"),
+                  ("死叉" if k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2] else "未形成交叉"),
     }
 
 

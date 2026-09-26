@@ -76,19 +76,18 @@ description: >
 
 ## 分析维度（默认全套，按需裁剪）
 
-### 一、股票（默认 11 维）
+### 一、股票（默认 14 维）
 
 每个维度均输出：**描述句 → 数据表 → 分析评价**
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
-| 1 | 概况 | `stock_basic`、`stock_company` | 公司全称、行业（申万）、上市日期、注册地、员工数、主营业务简介 |
-| 2 | 行情趋势 | `daily`、`weekly`、`monthly`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数) | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**基准对比**：对沪深300及所属行业指数计算相同口径的涨跌幅、年化波动率、最大回撤、夏普比率，与标的并列对比（判断超额收益与相对风险） |
-| 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业)、`index_member`(行业成分股) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_member` 取成分股 → 各取 `daily_basic` PE/PB，先 `winsorize_cross_section` 截面去极值再求均值/中位数，避免单只异常股拉偏）；**PE/PB 双口径分位**（`valuation_percentiles`：近 5 年历史分位 + 当日同行业截面分位，双口径背离时需找原因） |
-| 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`** | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）** |
-| 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`** | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向 |
-| 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`** | 前十大股东/流通股东集中度、**股东户数时间序列分析（筹码集中度指标）**、大股东增减持方向与比例 |
-
+| 1 | 概况 | `stock_basic`、`stock_company`、`fina_mainbz`、`namechange`、`new_share` | 公司全称、行业（申万）、上市日期、注册地、员工数、主营业务简介；**主营业务构成**（最新报告期按产品收入前三及占比）、曾用名、次新股标记（近1年IPO附发行价/PE） |
+| 2 | 行情趋势 | `daily`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数)；周线/月线由日线重采样（不单独取 `weekly`/`monthly`） | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**基准对比**：对沪深300及所属行业指数计算相同口径的涨跌幅、年化波动率、最大回撤、夏普比率，与标的并列对比（判断超额收益与相对风险） |
+| 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业)、`index_member`(行业成分股)、`dividend`(近3年实施分红) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值、近3年分红次数与累计每股分红（cash_div_tax 为每股税前口径）；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_member` 取成分股 → 各取 `daily_basic` PE/PB，先 `winsorize_cross_section` 截面去极值再求均值/中位数，避免单只异常股拉偏）；**PE/PB 双口径分位**（`valuation_percentiles`：近 5 年历史分位 + 当日同行业截面分位，双口径背离时需找原因） |
+| 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`**、`express`(业绩快报)、`fina_audit`(审计意见)、`disclosure_date`(披露计划) | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）**；业绩快报（早于定期报告的营收/净利同比）；审计意见（非标准无保留→风险信号）；下一期财报预定披露日（事件窗口） |
+| 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`**、`hsgt_top10`(北向十大成交)、`repurchase`(回购)、`broker_recommend`(券商金股) | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向；沪深股通十大成交股上榜次数与净买入（`net_amount` 单位：元）、近一年回购金额（万元）、近3个月券商金股入选（month 必选按月查询后本地过滤） |
+| 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`**、`pledge_stat`/`pledge_detail`(股权质押)、`stk_managers`/`stk_rewards`(管理层) | 前十大股东/流通股东集中度、**股东户数时间序列分析（筹码集中度指标）**、大股东增减持方向与比例；股权质押比例（>30% 为偏高风险信号）；高管披露记录（`stk_managers` 实际不返回 end_date、含历史记录，现任规模以 `stk_rewards` 最新报告期披露人数为准）与薪酬持股 |
 ### 筹码集中度分析（股东户数时间序列）
 
 股东户数的时间序列变化是判断筹码集中/分散的核心指标，比单点数值更有意义：
@@ -99,13 +98,18 @@ description: >
   - 对比近 4 个季度股东户数变化率，判断趋势方向
   - 结合股价走势交叉验证（均为相关性观察，非因果结论）：户数持续下降 + 股价上涨 = 可能筹码锁定（健康上涨特征之一）；户数持续下降 + 股价下跌 = 可能主力被套（阶段见底信号之一）；户数持续上升 + 股价上涨 = 可能散户接盘（警惕见顶）
   - 使用 `stk_holdernumber` 接口获取历史数据，按 `end_date` 排序后计算环比变化率
-| 7 | 两融/杠杆情绪 | `margin_detail` | 融资余额及变化率、融券余额、近5日融资余额变化 |
-| 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst` | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖 |
+| 7 | 两融/杠杆情绪 | `margin_detail`、`margin_secs`(两融标的名单) | 融资余额及变化率、融券余额、近5日融资余额变化；是否两融标的（明细为空时用于区分"非两融标的"与"数据缺失"） |
+| 8 | 市场异动 | `limit_list_d`、`top_list`、`top_inst`、`stk_shock`/`stk_high_shock`(异常波动)、`stk_alert`(重点提示)、`stk_limit`(涨跌停价格)、`hm_detail`/`hm_list`(游资)、`suspend_d`(停复牌) | 近期涨停/跌停记录、龙虎榜上榜次数、机构净买卖；近一年异常波动/严重异常波动记录、交易所重点提示、最近交易日涨跌停价格、近120日游资上榜明细（`net_amount` 单位：元）、近60日停复牌记录（`suspend_type`: S-停牌 R-复牌） |
 | 9 | 解禁压力 | **`share_float`** | 未来 3 个月即将解禁股份数量及占比 |
-| 10 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr`、`cn_gdp` | 大盘近期走势、CPI/PPI 走势与方向、LPR 利率水平、GDP 同比 |
+| 10 | 宏观/市场环境 | `index_daily`(沪深300)、`cn_cpi`、`cn_ppi`、`shibor_lpr`、`cn_gdp`、`cn_m`(货币供应)、`shibor`、`daily_info`+`sz_daily_info`(市场成交统计) | 大盘近期走势、CPI/PPI 走势与方向、LPR 利率水平、GDP 同比、M1/M2 同比与剪刀差、Shibor 3M、A股总成交额与沪市平均PE（`daily_info` 用 SH_A 板块、`sz_daily_info` 用"股票"板块，`amount` 单位：亿元） |
 | 11 | 风险提示 | 汇总以上维度 | 综合风险分级：高/中/低，列出具体风险信号 |
+| 12 | 动量质量（因子化） | `daily`、`adj_factor` | 高质量动量(r_60-3000σ²)、振幅切割动量A/B(低/高振幅日ret加总) |
+| 13 | 微观结构（因子化） | `daily`、`adj_factor` | 上下影线因子(蜡烛/威廉版5日标准化)、理想振幅V(λ)=V_high-V_low |
+| 14 | 行为金融（因子化） | `daily`、`daily_basic`、`index_daily`(沪深300) | 凸显度/惊恐度STR(指数近似截面均值)、处置效应CGO(换手率衰减加权参考价) |
 
-### 二、指数（默认 8 维）
+> **因子化洞察**：动量质量/微观结构/行为金融三个因子维度由 `scripts/factor_signals.py` 实现（QuantsPlaybook 研报因子，纯时序单标的计算——不依赖全市场截面，截面 rank 未做、行业/市值中性化未做，因子为原始值非纯净因子；数据口径假设见该模块 docstring）。因子洞察通过 `DimensionResult.insights` 字段承载，报告自动渲染「**因子洞察**」列表。
+
+### 二、指数（默认 9 维）
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
@@ -116,12 +120,13 @@ description: >
 | 5 | 行业分布 | `index_weight` 获取成分股 + `stock_basic` 查行业 | 成分股按申万行业归类，统计各行业数量及占比（前三行业占比） |
 | 6 | 两融/市场杠杆 | `margin`（全市场两融汇总） | 两市融资余额合计、近一年（250 交易日）变化方向、杠杆情绪判断 |
 | 7 | 对比 | `index_global` | 与同类指数/国际指数近期表现对比。**`index_global` 的 `ts_code` 无点前缀**（如 `DJI`/`SPX`/`IXIC`/`N225`/`HSI`，非 `.DJI`），代码格式需查 `references/国际指数.md` 文档。**注意：`index_global` 返回数据为降序（最新在前），计算前必须 `.sort_values('trade_date')`，否则 `iloc` 索引取到的日期方向相反，导致涨跌幅方向错误** |
-| 8 | 风险提示 | 汇总以上维度 | 波动偏高/回撤较深/估值偏高等风险信号 |
-### 三、公募基金（默认 9 维）
+| 8 | 动量质量（因子化） | `index_daily` | 高质量动量(r_60-3000σ²)、振幅切割动量A/B(低/高振幅日ret加总)；来源 `scripts/factor_signals.py`，纯时序单标的计算 |
+| 9 | 风险提示 | 汇总以上维度 | 波动偏高/回撤较深/估值偏高等风险信号 |
+### 三、公募基金（默认 10 维）
 
 | # | 维度 | 数据接口 | 关键分析指标 |
 |---|------|---------|------------|
-| 1 | 概况 | `fund_basic` | 基金类型、成立日期、上市日期、基金简称 |
+| 1 | 概况 | `fund_basic`、`fund_company`(管理人) | 基金类型、成立日期、上市日期、基金简称；管理人信息（`fund_company` 无入参返回全量，按 `fund_basic.management` 名称本地过滤：简称/成立日期/注册资本/董事长） |
 | 2 | 净值走势 | `fund_nav`、**`fund_adj`**、**`fund_daily`**（场内ETF） | 近 1/3/6 月、近 1/3 年收益率（基于复权净值）；**场内 ETF 必须用 `fund_daily` + `apply_etf_adj` 复权**（`daily` 接口对 ETF 返回空，且不复权价在份额拆分时严重失真） |
 | 3 | 业绩指标 | 基于 `fund_nav`/`fund_daily` 计算 | 年化波动率、夏普比率、最大回撤 |
 | 4 | 同类对比 | `fund_basic`(筛同类型)、`fund_daily`/`fund_nav`(逐只) | 同类排名（近 20/60/120/250 日分位）；ETF 优先选同后缀场内基金对比，按成立日期排序优先选上市早的 |
@@ -129,7 +134,8 @@ description: >
 | 6 | 持仓分析 | `fund_portfolio` | 前十大重仓股及占比（`stk_mkv_ratio`）、补充股票名称；字段为 `symbol`/`mkv`/`stk_mkv_ratio`（非 name/ratio/market_val） |
 | 7 | 规模变化 | `fund_share` | 按季度采样（`groupby` 季度末），近4季份额变化趋势 |
 | 8 | 分红 | `fund_div` | 累计分红次数、分红金额；字段为 `ex_date`/`div_cash`（非 div_date） |
-| 9 | 风险提示 | 汇总以上维度 | 回撤较深/波动偏高/份额缩水等风险信号 |
+| 9 | 动量质量（因子化） | `fund_daily`+`fund_adj`(ETF)、`fund_nav`(场外) | 高质量动量(r_60-3000σ²)；ETF 另有振幅切割动量A/B（OHLC 全列复权）；场外无 OHLC 该子项不适用 |
+| 10 | 风险提示 | 汇总以上维度 | 回撤较深/波动偏高/份额缩水等风险信号 |
 
 > **份额口径声明（规模变化/同类对比维度的评价句必写）**：`fund_share.fd_share` 为**单只基金**份额。同一指数常有场内 ETF + 场外联接 + 多只跟踪基金并存（如名称含"沪深300"的基金几十只），份额/规模数据均为单只口径，不得表述为"该指数全部基金合计"。评价句必须注明是"XX基金单只份额"还是"场内外合计"，避免用户误读为指数整体规模。
 ### 四、期货（默认 7 维）
@@ -143,6 +149,13 @@ description: >
 | 5 | 仓单库存 | `fut_wsr` | 注册仓单量变化、库存/消费比 |
 | 6 | 结算参数 | `fut_settle` | 当日结算价、交割结算价、保证金调整 |
 | 7 | 风险提示 | 汇总以上维度 | 波动偏高/换月跳空/持仓异常等风险信号 |
+
+
+> **接口覆盖设计决定**（数据侧可用但报告不接入的接口及原因，避免误判为遗漏）：
+> - 股票 `weekly`/`monthly`、指数 `index_weekly`/`index_monthly`：周线/月线均可由日线重采样得到，不单独取数。
+> - `shibor_quote`（报价行明细）、`hibor`/`libor`（离岸利率）、`wz_index`（民间借贷利率）：对单标的报告信号弱，不接入；如需跨市场利率环境分析再扩展。
+> - `index_member_all`：与 `index_weight` + `stock_basic` 行业匹配能力重复，不接入。
+> - `index_classify`/`index_member` 由股票报告"估值-行业对比"维度消费，指数报告不重复接入。
 
 ## 报告结构
 每份分析报告输出为独立 HTML 文件（浏览器直接打开，时间序列图表内联在各维度章节内）。内容结构如下，每个维度按 **描述句 → 数据表 → 分析评价** 的格式，最后附整体分析评价：
@@ -334,6 +347,14 @@ description: >
   - `daily` 的 `amount` 字段单位为**千元**（即元×1000），换算亿元需 `/1e5`
   - `daily_basic` 的 `total_mv` 字段单位为**万元**，换算亿元需 `/1e4`
   - `margin_detail` 的 `rzye` 字段单位为**元**，换算亿元需 `/1e8`
+  - `hm_detail` 的 `net_amount` 单位为**元**；`hsgt_top10` 的 `net_amount` 单位为**元**
+  - `repurchase` 的 `amount` 单位为**万元**；接口无 ts_code 入参，按公告日期区间取全市场后本地过滤
+  - `daily_info`/`sz_daily_info` 的 `amount` 单位为**亿元**（板块口径：沪市 `SH_A`、深市 `股票`）
+  - `dividend` 的 `cash_div_tax` 为**每股**分红（税前），非每10股口径；`div_proc` 需筛"实施"
+  - `broker_recommend` 的 `month`（YYYYMM）为**必选**入参，按月循环查询后本地过滤标的
+  - `daily_basic` 的 `turnover_rate` 为**百分比**(2.5=2.5%)，参与因子乘法（如 CGO 换手率衰减加权）前必须 `/100` 转比例（factor_signals 内部已处理）
+  - CGO 因子 VWAP = `amount`×1000 / (`vol`×100)（`amount` 单位千元、`vol` 手=100股，得元/股）
+
   - `fund_share` 的 `fd_share` 字段单位为**万份**，换算亿份需 `/1e4`
   - 其他接口以对应接口文档标注为准，不得猜单位
 - **场内基金（ETF）特殊处理**：
