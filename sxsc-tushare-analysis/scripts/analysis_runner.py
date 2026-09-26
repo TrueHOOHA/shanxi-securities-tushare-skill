@@ -45,10 +45,6 @@ from risk_modeling import (
     calc_var_cvar,
 )
 from technical_indicators import calc_boll, calc_kdj, calc_macd, calc_rsi, calc_volume_ratio
-from factor_signals import (
-    calc_amplitude_momentum, calc_cgo,
-    calc_quantitative_momentum, calc_salience_score,
-)
 
 
 # ---------- 工具函数 ----------
@@ -91,7 +87,7 @@ class StockAnalysisRunner:
 
     PERIODS = (5, 20, 60, 120, 250)
     TRADING_DAYS_PER_YEAR = 250
-    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "momentum_quality", "behavioral", "macro", "risk"]
+    DEFAULT_DIMENSIONS = ["overview", "trend", "valuation", "financial", "moneyflow", "shareholder", "float", "margin", "market_activity", "macro", "risk"]
 
     def __init__(
         self,
@@ -1290,96 +1286,6 @@ class StockAnalysisRunner:
         conclusion = "；".join(parts) if parts else "宏观数据获取不完整"
         return DimensionResult.success("宏观环境", conclusion=conclusion, data=data)
 
-    # ---------- 维度：动量质量（因子化） ----------
-
-    @safe_result("动量质量")
-    def analyze_momentum_quality(self) -> DimensionResult:
-        start = shift_date(self.end_date, -250)
-        df_daily = self.api.get_daily(self.ts_code, start, self.end_date)
-        if df_daily is None:
-            return DimensionResult.empty("动量质量", note="无法获取日线行情")
-        df_adj = self.api.get_adj_factor(self.ts_code, start, self.end_date)
-        if df_adj is not None:
-            df = apply_adj_factor(df_daily, df_adj)
-            price = df["close_post"].sort_index()
-            high = df["high_post"].sort_index()
-            low = df["low_post"].sort_index()
-            _src = "复权行情(adj_factor)"
-        else:
-            df = df_daily.sort_values("trade_date").set_index("trade_date")
-            price = df["close"].sort_index()
-            high = df["high"].sort_index()
-            low = df["low"].sort_index()
-            _src = "未复权行情（缺复权因子，送转日因子可能失真）"
-        if len(price) < 121:
-            return DimensionResult.insufficient_history("动量质量", note="需至少121日数据")
-
-        qm = calc_quantitative_momentum(price, window=60)
-        am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3)
-        data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
-        conclusion = f"动量质量因子分析（数据源：{_src}）。"
-        insights = []
-        if qm:
-            insights.append(f"高质量动量得分 {qm['momentum']}（60日收益 {qm['raw_return'] * 100:.2f}%、日波动 {qm['sigma'] * 100:.2f}%；得分 = 收益 − 3000×方差，越大动量越强且质量越高）")
-        if am:
-            insights.append(f"振幅切割动量：A={am['a_factor']}（低振幅日收益合计，>0 动量正向）、B={am['b_factor']}（高振幅日收益合计，呈反转效应）")
-        if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
-            insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
-        return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
-
-    # ---------- 维度：行为金融（因子化） ----------
-
-    @safe_result("行为金融")
-    def analyze_behavioral(self) -> DimensionResult:
-        start = shift_date(self.end_date, -250)
-        df_daily = self.api.get_daily(self.ts_code, start, self.end_date)
-        if df_daily is None:
-            return DimensionResult.empty("行为金融", note="无法获取日线行情")
-        df_adj = self.api.get_adj_factor(self.ts_code, start, self.end_date)
-        if df_adj is not None:
-            df = apply_adj_factor(df_daily, df_adj)
-            close = df["close_post"].sort_index()
-        else:
-            df = df_daily.sort_values("trade_date").set_index("trade_date")
-            close = df["close"].sort_index()
-        close_raw = df_daily.sort_values("trade_date").set_index("trade_date")["close"]  # 未复权价：与 VWAP(amount/vol) 同口径，CGO 专用
-
-        if len(close) < 101:
-            return DimensionResult.insufficient_history("行为金融", note="需至少101日数据")
-
-        stock_ret = close.pct_change().dropna()
-        df_bench = self.api.get_index_daily("000300.SH", start, self.end_date)
-        bench_ret = None
-        if df_bench is not None and not df_bench.empty:
-            bench_close = df_bench.set_index("trade_date")["close"].sort_index()
-            bench_ret = bench_close.pct_change().dropna()
-
-        salience = calc_salience_score(stock_ret, bench_ret) if bench_ret is not None else None
-        cgo = None
-        try:
-            df_basic = self.api.get_daily_basic(self.ts_code, start, self.end_date)
-            if df_basic is not None and not df_basic.empty:
-                df_basic = df_basic.sort_values("trade_date").set_index("trade_date")
-                turnover = df_basic["turnover_rate"] if "turnover_rate" in df_basic.columns else None
-                amount = df["amount"] if "amount" in df.columns else None
-                vol = df["vol"] if "vol" in df.columns else None
-                if turnover is not None and amount is not None and vol is not None:
-                    cgo = calc_cgo(close_raw, amount, vol, turnover, n=100)  # 用未复权 close，避免后复权价与 VWAP 口径错位
-        except Exception:
-            cgo = None
-
-        data = {"salience": salience, "cgo": cgo}
-        conclusion = "行为金融因子分析。"
-        insights = []
-        if salience and salience.get("terrified_score") is not None:
-            ts = salience["terrified_score"]
-            interp = "偏高，近期收益频繁偏离大盘，警惕注意力驱动的过度交易" if ts > 0 else "偏低，近期走势与大盘贴近，未吸引过度注意力"
-            insights.append(f"凸显度/惊恐度 {ts}：{interp}。注：以沪深300近似截面均值，低凸显股票未来收益更好")
-        if cgo and cgo.get("cgo") is not None:
-            cv = cgo["cgo"]
-            interp = "处于浮亏区，投资者惜售情绪或形成支撑，历史负 IC 预示反弹概率偏高" if cv < 0 else "处于浮盈区，投资者可能倾向兑现收益"
-            insights.append(f"处置效应 CGO={cv}：{interp}")
-        return DimensionResult.success("行为金融", conclusion=conclusion, data=data, insights=insights)
 
 
     # ---------- 维度：风险提示（汇总） ----------
@@ -1533,8 +1439,6 @@ class StockAnalysisRunner:
             "margin": self.analyze_margin,
             "market_activity": self.analyze_market_activity,
             "macro": self.analyze_macro,
-            "momentum_quality": self.analyze_momentum_quality,
-            "behavioral": self.analyze_behavioral,
         }
         to_run = {d: dim_methods[d] for d in parallel_dims if d in dim_methods}
         if to_run:
@@ -1570,8 +1474,6 @@ class StockAnalysisRunner:
         "margin": "两融杠杆",
         "market_activity": "市场异动",
         "macro": "宏观环境",
-        "momentum_quality": "动量质量",
-        "behavioral": "行为金融",
         "risk": "风险提示",
     }
 
@@ -1587,8 +1489,6 @@ class StockAnalysisRunner:
         "margin": "两融杠杆：融资融券余额变化，判断市场杠杆情绪与追高/撤离信号。",
         "market_activity": "市场异动：涨跌停、龙虎榜与机构席位，捕捉短期资金的极端关注。",
         "macro": "宏观环境：大盘走势、CPI/PPI、LPR 与 GDP，判断整体顺风或逆风。",
-        "momentum_quality": "动量质量：用风险调整后的动量得分，判断涨势是稳健的小波动驱动（高质量）还是少数大波动堆出来的（低质量、持续性存疑）。",
-        "behavioral": "行为金融：从凸显度、处置效应与参考点看市场情绪偏差与投资者心理锚。",
         "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
     }
 
@@ -1709,11 +1609,6 @@ class StockAnalysisRunner:
                 lines.append(res.conclusion)
             if res.is_ok() and res.data:
                 lines.extend(self._render_dimension(res))
-                if res.insights:
-                    lines.append("")
-                    lines.append("**因子洞察**：")
-                    for _ins in res.insights:
-                        lines.append(f"- {_ins}")
             elif res.note:
                 lines.append(f"- {res.note}")
             lines.append("")
@@ -2301,34 +2196,6 @@ class StockAnalysisRunner:
             lines.append("")
             lines.append(self._macro_eval(data))
 
-        elif res.title == "动量质量":
-            rows = []
-            qm = data.get("quantitative_momentum", {})
-            if qm:
-                rows.append({"指标": "高质量动量得分(r_60-3000σ²)", "数值": self._fmt(qm.get("momentum"), digits=4)})
-                rows.append({"指标": "原始60日收益", "数值": self._fmt(qm.get("raw_return"), digits=4)})
-                rows.append({"指标": "60日收益标准差", "数值": self._fmt(qm.get("sigma"), digits=4)})
-            am = data.get("amplitude_momentum", {})
-            if am:
-                rows.append({"指标": "振幅切割A因子(低振幅日)", "数值": self._fmt(am.get("a_factor"), digits=4)})
-                rows.append({"指标": "振幅切割B因子(高振幅日)", "数值": self._fmt(am.get("b_factor"), digits=4)})
-            if data.get("source"):
-                rows.append({"指标": "数据源", "数值": data["source"]})
-            if rows:
-                lines.append(self._md(pd.DataFrame(rows)))
-
-
-        elif res.title == "行为金融":
-            rows = []
-            sal = data.get("salience", {})
-            if sal:
-                rows.append({"指标": "凸显度/惊恐度", "数值": self._fmt(sal.get("terrified_score"), digits=6)})
-            cgo = data.get("cgo", {})
-            if cgo:
-                rows.append({"指标": "处置效应CGO", "数值": self._fmt(cgo.get("cgo"), digits=4)})
-                rows.append({"指标": "参考价RP", "数值": self._fmt(cgo.get("rp"))})
-            if rows:
-                lines.append(self._md(pd.DataFrame(rows)))
 
         return [l for l in lines if l is not None]
 
