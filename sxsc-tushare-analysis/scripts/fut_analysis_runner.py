@@ -166,8 +166,17 @@ class FutAnalysisRunner:
         _set = daily.dropna(subset=["settle"]) if "settle" in daily.columns else daily
         latest_settle = _safe_float(_set.iloc[-1].get("settle")) if "settle" in daily.columns and not _set.empty else None
         latest_oi = _safe_float(daily.iloc[-1].get("oi")) if "oi" in daily.columns else None
+        # ⚠️ SKILL.md:143 要求"结算价走势、日内振幅"：行情趋势各指标基于收盘价
+        # （未复权），补上最新交易日日内振幅（(high-low)/pre_close），口径在文案中说明。
+        _amp = None
+        if {"high", "low", "pre_close"}.issubset(daily.columns):
+            _last_row = daily.iloc[-1]
+            _pc = _safe_float(_last_row.get("pre_close"))
+            if _pc and _pc > 0:
+                _amp = round((float(_last_row["high"]) - float(_last_row["low"])) / _pc * 100, 2)
         data = {"returns": ret, "latest_close": latest_close, "latest_settle": latest_settle,
-                "latest_oi": latest_oi, "volatility": vol, "max_drawdown": mdd, "sharpe": sh,
+                "latest_oi": latest_oi, "intraday_amplitude_pct": _amp,
+                "volatility": vol, "max_drawdown": mdd, "sharpe": sh,
                 "ma": ma, "macd": macd, "rsi": rsi, "kdj": kdj, "boll": boll, "daily": daily,
                 "chart": {
                     "title": "主力连续合约日线（未复权）",
@@ -181,7 +190,12 @@ class FutAnalysisRunner:
         _r250 = ret.get("近250日涨幅%") if ret.get("近250日涨幅%") not in (None, "N/A") else "数据不足"
         conclusion = (f"最新收盘 {latest_close}，近20日 {_r20}%，"
                       f"近250日 {_r250}%，年化波动 {vol if vol is not None else '数据不足'}%，"
-                      f"最大回撤 {mdd if mdd is not None else '数据不足'}%。")
+                      f"最大回撤 {mdd if mdd is not None else '数据不足'}%")
+        if _amp is not None:
+            conclusion += f"，最新日内振幅 {_amp}%"
+        if latest_settle is not None:
+            conclusion += f"，最新结算价 {latest_settle}"
+        conclusion += "。行情指标均基于收盘价（未复权），结算价另列。"
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
 
     # ---------- 维度：持仓分析 ----------
@@ -230,8 +244,47 @@ class FutAnalysisRunner:
             )
         holding_df = holding_df.sort_values("trade_date") if "trade_date" in holding_df.columns else holding_df
         data = {"holding_records": holding_df.tail(20).to_dict("records"), "covered_exchange": True}
-        return DimensionResult.success("持仓分析", data=data,
-                                       conclusion=f"持仓排名数据 {len(holding_df)} 条（{EXCHANGE_MAP.get(suf,(None,''))[1]}）。")
+
+        # ⚠️ SKILL.md:144 要求"前20会员多空持仓排名与多空比"——此前只 dump 原始行，
+        # 从未聚合出多空比。fut_holding 是"每会员每日持仓排名"（前 N 会员），
+        # 取最新交易日合计多/空持仓，计算多空比与多单前5会员集中度。
+        long_short_ratio = None
+        holding_date = None
+        top_long_brokers = []
+        top_long_share_pct = None
+        _hl = ("long_hld" in holding_df.columns and "short_hld" in holding_df.columns
+               and "broker" in holding_df.columns)
+        if _hl:
+            lr = holding_df.dropna(subset=["long_hld", "short_hld"])
+            if not lr.empty:
+                holding_date = lr["trade_date"].max()
+                lr_latest = lr[lr["trade_date"] == holding_date].sort_values("long_hld", ascending=False)
+                long_total = float(pd.to_numeric(lr_latest["long_hld"], errors="coerce").sum())
+                short_total = float(pd.to_numeric(lr_latest["short_hld"], errors="coerce").sum())
+                if long_total > 0 and short_total > 0:
+                    long_short_ratio = round(long_total / short_total, 2)
+                data["holding_date"] = holding_date
+                data["long_total"] = long_total
+                data["short_total"] = short_total
+                data["long_short_ratio"] = long_short_ratio
+                if long_total > 0:
+                    top_long_brokers = [
+                        {"broker": r.get("broker"), "long_hld": _safe_float(r.get("long_hld")),
+                         "short_hld": _safe_float(r.get("short_hld"))}
+                        for _, r in lr_latest.head(5).iterrows()
+                    ]
+                    data["top_long_brokers"] = top_long_brokers
+                    top_long_share_pct = round(sum(b["long_hld"] for b in top_long_brokers if b["long_hld"]) / long_total * 100, 1) if long_total else None
+                    data["top_long_share_pct"] = top_long_share_pct
+
+        conclusion = f"持仓排名数据 {len(holding_df)} 条（{EXCHANGE_MAP.get(suf,(None,''))[1]}）。"
+        if long_short_ratio is not None:
+            conclusion += (f" 最新交易日 {holding_date} 前{len(lr_latest)}会员多空比 {long_short_ratio}"
+                           f"（多单 {data['long_total']:.0f} / 空单 {data['short_total']:.0f}）。")
+        if top_long_share_pct is not None:
+            _top_txt = "、".join(f"{b['broker']}(多单 {b['long_hld']:.0f})" for b in top_long_brokers[:3])
+            conclusion += f" 多单前3会员占比 {top_long_share_pct}%（{_top_txt}）。"
+        return DimensionResult.success("持仓分析", conclusion=conclusion, data=data)
 
     # ---------- 维度：主力合约 ----------
     @safe_result("主力合约")
@@ -291,21 +344,30 @@ class FutAnalysisRunner:
             conclusion = f"结算参数来自 fut_settle（{code}），最新 {len(fs)} 条。"
             return DimensionResult.success("结算参数", conclusion=conclusion, data=data)
         # 降级：从日线取结算价（连续合约通常无 fut_settle 结算参数）
-        trend = self.results.get("trend")
+        daily = self.api.get_fut_daily(self.ts_code, shift_date(self.end_date, -10), self.end_date)
         latest_settle = None
-        if trend and trend.is_ok() and trend.data:
-            latest_settle = trend.data.get("latest_settle")
-        if latest_settle is None:
-            daily = self.api.get_fut_daily(self.ts_code, shift_date(self.end_date, -10), self.end_date)
-            if daily is not None and not daily.empty and "settle" in daily.columns:
+        latest_delv_settle = None
+        if daily is not None and not daily.empty:
+            if "settle" in daily.columns:
                 d = daily.sort_values("trade_date").dropna(subset=["settle"])
                 if not d.empty:
                     latest_settle = _safe_float(d.iloc[-1]["settle"])
-        data = {"latest_settle": latest_settle, "source": "fut_daily(降级)"}
+            # 交割结算价（SKILL.md:147 要求输出；fut_daily 含 delv_settle 列）
+            if "delv_settle" in daily.columns:
+                _dd = daily.sort_values("trade_date").dropna(subset=["delv_settle"])
+                if not _dd.empty:
+                    latest_delv_settle = _safe_float(_dd.iloc[-1]["delv_settle"])
+        if latest_settle is None:
+            trend = self.results.get("trend")
+            if trend and trend.is_ok() and trend.data:
+                latest_settle = trend.data.get("latest_settle")
+        data = {"latest_settle": latest_settle, "latest_delv_settle": latest_delv_settle, "source": "fut_daily(降级)"}
         # 不直显 "N/A"：给出可解释的缺失文案
         _settle_txt = f"最新结算 {latest_settle}" if latest_settle is not None else "最新结算价暂缺（最新交易日结算中或数据未更新）"
-        return DimensionResult.success("结算参数", data=data,
-                                       conclusion=f"fut_settle 对连续/主力合约无数据，结算价取自 fut_daily：{_settle_txt}。保证金率等参数暂缺。")
+        conclusion = f"fut_settle 对连续/主力合约无数据，结算价取自 fut_daily：{_settle_txt}。保证金率等参数暂缺。"
+        if latest_delv_settle is not None:
+            conclusion += f" 最新交割结算价 {latest_delv_settle}。"
+        return DimensionResult.success("结算参数", data=data, conclusion=conclusion)
 
     # ---------- 维度：风险提示 ----------
     @safe_result("风险提示")
@@ -503,7 +565,14 @@ class FutAnalysisRunner:
             lines.append(f"**分析评价**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI超买(>70)/超卖(<30)为短期状态指标。")
         elif res.title == "持仓分析":
             if res.status == ResultStatus.SUCCESS and data.get("holding_records"):
-                lines.append(self._md(pd.DataFrame(data["holding_records"]).head(10)))
+                # 精选列并中文标注：原始行含 vol_chg/long_chg 等大量 NaN 字段，
+                # 直接 dump 会产生整排 N/A（不是"无数据"，是这些变动字段服务端未披露）
+                _hr = data.get("holding_records", [])
+                _rows = [{"交易日": r.get("trade_date"), "会员": r.get("broker"),
+                          "成交量(手)": self._fmt(r.get("vol")),
+                          "多单持仓(手)": self._fmt(r.get("long_hld")),
+                          "空单持仓(手)": self._fmt(r.get("short_hld"))} for r in _hr[:10]]
+                lines.append(self._md(pd.DataFrame(_rows)))
                 lines.append("")
                 lines.append("**分析评价**：持仓排名反映多空主力结构，前20会员多空比可判断机构倾向。")
             else:
@@ -586,8 +655,17 @@ class FutAnalysisRunner:
         if w_ok:
             _ws = wsr.data.get("wsr_series") or []
             _latest_ws_vol = _ws[-1].get("vol", "N/A") if _ws else "N/A"
-            pts.append(f"- **仓单**：最新 {_latest_ws_vol} 张，{wsr.data.get('trend','')}")
-        pts.append("- **数据口径**：持仓排名接口仅覆盖大商所（本品种已降级为持仓量序列）；基差需现货价（本数据源无现货接口）；结算参数取自当前主力具体合约")
+            _ws_unit = (_ws[-1].get("unit") or "张") if _ws else "张"
+            pts.append(f"- **仓单**：最新 {_latest_ws_vol} {_ws_unit}，{wsr.data.get('trend','')}")
+        # 数据口径按实际状态描述：持仓维度成功/降级/未覆盖要区分，不再硬编码"已降级"
+        _holding = self.results.get("holding")
+        if _holding is not None and _holding.is_ok() and _holding.data and _holding.data.get("holding_records"):
+            _hd_txt = "持仓排名已取到（前20会员多空持仓）"
+        elif _holding is not None and _holding.data and _holding.data.get("oi_series"):
+            _hd_txt = "持仓排名缺失，已降级为持仓量(oi)序列"
+        else:
+            _hd_txt = "持仓排名接口仅覆盖大商所(DCE)，本品种无持仓排名数据"
+        pts.append(f"- **数据口径**：{_hd_txt}；基差需现货价（本数据源无现货接口）；结算参数取自当前主力具体合约")
         lines.extend(pts)
         lines.append("")
         lines.append(f"**风格定位**：{name}属期货品种，受供需、季节性、宏观与政策等多因素影响，杠杆交易放大波动。")

@@ -69,8 +69,40 @@ def data_error_note(limit: int = 3) -> Optional[str]:
 # ---------- 工具函数 ----------
 
 def shift_date(date_str: str, days: int) -> str:
+    """按**自然日**回溯日期（YYYYMMDD）。
+
+    ⚠️ 这是自然日，不是交易日！"近 250 交易日"不能写成 -250（约等于 166 交易日），
+    "近 5 年"不能写成 -250*5（约 3.4 年）。需要按交易日回溯时用 `shift_trade_days`，
+    或至少按 交易日≈自然日*365/250 折算（250 交易日 ≈ 365 自然日）。
+    """
     d = datetime.strptime(date_str, "%Y%m%d")
     return (d + timedelta(days=days)).strftime("%Y%m%d")
+
+
+def shift_trade_days(date_str: str, days: int, api: Optional["DataAPI"] = None) -> str:
+    """按交易日回溯（经 trade_cal 校准），用于"近 N 交易日"口径的窗口计算。
+
+    与 shift_date（自然日）区分：涉及"交易日"语义的窗口必须用本函数，
+    否则窗口系统性偏短约 1/3（如 250 自然日 ≈ 166 交易日）。
+    失败时回退为自然日估算（250 交易日 ≈ 365 自然日），并如实返回。
+    """
+    try:
+        end = date_str
+        api = api or DataAPI()
+        cal = api.get_trade_cal("SSE", shift_date(end, -max(days * 2, 366)), end)
+        if cal is not None and not cal.empty and "cal_date" in cal.columns:
+            is_open = cal["is_open"].astype(str).str.upper() if "is_open" in cal.columns else None
+            dates = cal["cal_date"].astype(str).tolist()
+            if is_open is not None:
+                dates = [d for d, o in zip(dates, is_open) if o in ("1", "Y", "TRUE", "True")]
+            dates = sorted(set(dates))
+            if dates and dates[-1] <= end:
+                idx = len(dates) - 1
+                if days <= idx:
+                    return dates[idx - days]
+        return shift_date(end, -int(round(days * 365 / 250)))
+    except Exception:
+        return shift_date(date_str, -int(round(days * 365 / 250)))
 
 
 # ---------- 进程级速率限制器 ----------
@@ -675,7 +707,7 @@ class DataAPI:
 
     # ---------- 期货 ----------
 
-    def _fut_sdk_call(self, api_name: str, params: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    def _fut_sdk_call(self, api_name: str, params: Dict[str, Any], fields: str = "") -> Optional[pd.DataFrame]:
         """期货接口SDK调用：不传fields，规避定制SDK字段名校验，返回全字段本地选列。"""
         _acquire_rate_slot()
         params = self._cap_dates(params)
@@ -683,7 +715,7 @@ class DataAPI:
             api = getattr(self._pro, api_name, None)
             if api is not None:
                 return safe_call(api, **params)
-        return self._http_call(api_name, params, "")
+        return self._http_call(api_name, params, fields)
 
     def get_fut_basic(self, exchange: Optional[str] = None, fut_type: Optional[str] = None,
                       ts_code: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -698,7 +730,18 @@ class DataAPI:
         return self._fut_sdk_call("fut_basic", params)
 
     def get_fut_daily(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-        df = self._fut_sdk_call("fut_daily", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date})
+        """期货日线行情。
+
+        ⚠️ 显式请求含 `delv_settle`（交割结算价，SKILL.md 期货结算维度要求输出）。
+        字段清单 = 实测默认返回列 + delv_settle，逐项已验证存在——服务端对不存在的
+        字段会整体拒绝（code=40101），不能凭空加列。
+        """
+        df = self._fut_sdk_call(
+            "fut_daily",
+            {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+            "ts_code,trade_date,pre_close,pre_settle,open,high,low,close,settle,"
+            "change1,change2,vol,amount,oi,oi_chg,delv_settle",
+        )
         return drop_t0_placeholder(df, ["close"])
 
     def get_fut_mapping(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:

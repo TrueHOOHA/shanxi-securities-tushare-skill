@@ -56,7 +56,9 @@ def _is_etf(ts_code: str) -> bool:
 class FundAnalysisRunner:
     """基金综合分析 Runner。"""
 
-    PERIODS = (5, 20, 60, 120, 250)
+    # ⚠️ SKILL.md:127 要求"近3年收益率"：PERIODS 需含 750 交易日（约3年）。
+    # 取数窗口 = max(PERIODS)*2 自然日 = 1500 自然日 ≈ 1024 交易日，足够支撑 750 日收益。
+    PERIODS = (5, 20, 60, 120, 250, 750)
     DEFAULT_DIMENSIONS = ["overview", "nav", "performance", "peer", "manager", "portfolio", "share", "div", "momentum_quality", "risk"]
 
     def __init__(
@@ -1126,7 +1128,7 @@ class FundAnalysisRunner:
 
         elif res.title == "净值走势":
             returns = data.get("returns", {})
-            all_keys = [k for k in ["近5日涨幅%", "近20日涨幅%", "近60日涨幅%", "近120日涨幅%", "近250日涨幅%"] if k in returns]
+            all_keys = [k for k in ["近5日涨幅%", "近20日涨幅%", "近60日涨幅%", "近120日涨幅%", "近250日涨幅%", "近750日涨幅%"] if k in returns]
             rows = [{"区间": k, "数值": self._fmt(returns.get(k))} for k in all_keys]
             lines.append(self._md(pd.DataFrame(rows)))
             lines.append("")

@@ -380,6 +380,7 @@ description: >
   - `margin`（全市场两融汇总）的交易所参数/字段是 `exchange_id`（非 `exchange`），`rzye` 单位为元
 - **指数成分权重参数注意**：`index_weight` 的入参是 `index_code`（**非 ts_code**，传 ts_code 会报 "index_code required"）；输出字段为 `trade_date`/`con_code`/`weight`
 - 日期格式统一 `YYYYMMDD`。
+- **日期窗口口径（实测教训）**：`data_api.shift_date` 是**自然日**，不是交易日——"近 250 交易日"不能写 `-250`（实际只有约 166 交易日），"近 5 年"不能写 `-250*5`（约 3.4 年）。需要按交易日回溯时用 `data_api.shift_trade_days`；快速折算按 250 交易日 ≈ 365 自然日。
 - 未来日期自动裁剪到最近可用日期并提示用户。
 - **T-0 占位行处理**：Tushare 数据为 T-1，`end_date` 传当天时行情接口（`daily`/`fund_daily`/`index_daily` 等）会返回当天行但全字段为 NaN（T-0 数据未出）。取数后必须 `dropna(subset=['close'])` 去掉占位行，否则 `iloc[-1]` 取到 NaN 导致后续计算全错。
 - **交易日计数**："近 N 个交易日"需调 `trade_cal` 获取交易日历，按实际交易日回溯，不得按自然日估算。

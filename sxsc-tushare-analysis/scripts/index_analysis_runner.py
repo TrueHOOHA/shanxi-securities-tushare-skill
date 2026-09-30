@@ -147,15 +147,16 @@ class IndexAnalysisRunner:
 
     @safe_result("估值分析")
     def analyze_valuation(self) -> DimensionResult:
-        # index_dailybasic 对部分指数（如科创50）不可用
         # 取近 5 年估值序列。⚠️ 注意：shift_date 是自然日，5 年 = 365*5 自然日；
         # 旧实现写 -250*5 会只取到约 3.4 年（1250 自然日 ≈ 856 交易日），
         # "近5年"分位实际是"近3年多"的分位。不足时按实际返回量降级标注。
         start = shift_date(self.end_date, -365 * 5)
         df = self.api.get_index_dailybasic(self.ts_code, start, self.end_date)
         if df is None or df.empty:
-            # 不做聚合估算：无 index_dailybasic 官方指数级估值数据即判 empty，不编造数据
-            return DimensionResult.empty("估值分析", note="该指数暂无指数级估值数据（index_dailybasic 未覆盖）")
+            # ⚠️ SKILL.md:115：index_dailybasic 不覆盖的指数（实测 科创100 000698.SH 为空）
+            # 降级为成分股 daily_basic 聚合估算（截面中位数 + 历史分位），并标注数据源；
+            # 不再直接判 empty（旧注释"不做聚合估算"与 SKILL 要求相悖）。
+            return self._valuation_from_constituents(start)
 
         df = df.sort_values("trade_date").reset_index(drop=True)
         latest = df.iloc[-1]
@@ -201,6 +202,80 @@ class IndexAnalysisRunner:
         if pb_hist is not None:
             conclusion += f"，PB近5年历史分位 {pb_hist}%"
         elif pb is not None and hist_count < 250:
+            conclusion += f"，PB近5年历史分位{hist_note}"
+        return DimensionResult.success("估值分析", conclusion=conclusion, data=data)
+
+    def _valuation_from_constituents(self, start: str) -> DimensionResult:
+        """成分股聚合估值（SKILL.md:115 降级路径，仅当 index_dailybasic 未覆盖时触发）。
+
+        index_weight 取最新一期成分（前 20 大权重股控制取数成本）→ 并行拉 daily_basic
+        （含 pe_ttm/pb 历史）→ 逐日截面中位数 → 当前中位数的历史分位。
+        数据源必须标注"成分股聚合估算"，与官方指数级估值区分。
+        """
+        import concurrent.futures
+        end = self.end_date
+        iw = self.api.get_index_weight(self.ts_code, shift_date(end, -40), end)
+        if iw is None or iw.empty:
+            return DimensionResult.empty("估值分析", note="该指数无指数级估值数据，且无法获取成分股权重（index_weight 未覆盖）")
+        iw = iw.sort_values("trade_date")
+        latest_wd = iw.iloc[-1]["trade_date"]
+        cons = iw[iw["trade_date"] == latest_wd].sort_values("weight", ascending=False).head(20)["con_code"].tolist()
+        if not cons:
+            return DimensionResult.empty("估值分析", note="该指数无指数级估值数据，且成分股列表为空")
+
+        def _fetch(code: str):
+            try:
+                d = self.api.get_daily_basic(code, start, end)
+                if d is not None and not d.empty and {"trade_date", "pe_ttm", "pb"}.issubset(d.columns):
+                    return d[["trade_date", "pe_ttm", "pb"]]
+            except Exception:
+                return None
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            frames = [f for f in ex.map(_fetch, cons) if f is not None and not f.empty]
+        if not frames:
+            return DimensionResult.empty("估值分析", note="该指数无指数级估值数据，且成分股 daily_basic 不可用")
+        # 逐日截面中位数（pe_ttm/pb 分别取当日成分股中位数）
+        med = pd.concat(frames).groupby("trade_date")[["pe_ttm", "pb"]].median().sort_index()
+        med = med.replace([float("inf"), float("-inf")], float("nan")).dropna(how="all")
+        if med.empty:
+            return DimensionResult.empty("估值分析", note="该指数成分股估值聚合结果为空")
+        latest = med.iloc[-1]
+        pe = round(float(latest["pe_ttm"]), 2) if pd.notna(latest["pe_ttm"]) else None
+        pb = round(float(latest["pb"]), 2) if pd.notna(latest["pb"]) else None
+        hist_count = len(med)
+        hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
+        pe_hist = pb_hist = None
+        if hist_count >= 250:
+            if pe is not None:
+                pe_hist = round(float((med["pe_ttm"] < pe).sum() / len(med) * 100), 1)
+            if pb is not None:
+                pb_hist = round(float((med["pb"] < pb).sum() / len(med) * 100), 1)
+
+        data = {
+            "pe": pe, "pb": pb,
+            "pe_hist_percentile": pe_hist, "pb_hist_percentile": pb_hist,
+            "hist_sample_days": hist_count,
+            "source": "成分股聚合估算", "constituent_count": len(frames),
+            "chart": {
+                "title": "成分股聚合 PE/PB 中位数走势（估算）",
+                "type": "line",
+                "dates": med.index.tolist(),
+                "series": [
+                    {"name": "PE(TTM)中位数", "yAxisIndex": 0, "data": [round(float(v), 2) if pd.notna(v) else None for v in med["pe_ttm"]]},
+                    {"name": "PB中位数", "yAxisIndex": 1, "data": [round(float(v), 2) if pd.notna(v) else None for v in med["pb"]]},
+                ],
+            },
+        }
+        conclusion = f"PE(TTM) {pe if pe is not None else '无数据'}，PB {pb if pb is not None else '无数据'}（成分股聚合估算，{len(frames)} 只成分股，非官方指数估值）"
+        if pe_hist is not None:
+            conclusion += f"，PE近5年历史分位 {pe_hist}%"
+        elif pe is not None:
+            conclusion += f"，PE近5年历史分位{hist_note}"
+        if pb_hist is not None:
+            conclusion += f"，PB近5年历史分位 {pb_hist}%"
+        elif pb is not None:
             conclusion += f"，PB近5年历史分位{hist_note}"
         return DimensionResult.success("估值分析", conclusion=conclusion, data=data)
 
@@ -263,19 +338,54 @@ class IndexAnalysisRunner:
         latest = df_w[df_w["trade_date"] == latest_date]
         codes = latest["con_code"].unique().tolist()  # 全量成分股，不截断
 
-        # 一次性查全市场 stock_basic（含 industry 字段），本地匹配成分股行业，避免逐只查被限流
+        # ⚠️ SKILL.md:117 要求申万 2021 口径。实现：index_classify(SW2021) 取申万一级
+        # 行业指数列表 → index_member 逐行业取在册成分 → 本地把指数成分股映射到申万行业。
+        # 任一步失败则回退 Tushare 自有分类并如实标注，绝不冒充申万。
         ind_map = {}
+        src_label = "Tushare分类（申万映射失败）"
         try:
-            all_basic = self.api.get_stock_basic(list_status="L", fields="ts_code,name,industry")
-            if all_basic is not None and not all_basic.empty:
-                ind_map = dict(zip(all_basic["ts_code"], all_basic["industry"]))
+            clf = self.api.get_index_classify(level="L1", src="SW2021")
+            if clf is not None and not clf.empty and {"index_code", "industry_name"}.issubset(clf.columns):
+                sw_rows = clf[["index_code", "industry_name"]].drop_duplicates("index_code").values.tolist()
+
+                def _members(code: str):
+                    try:
+                        m = self.api.get_index_member(code)
+                        if m is not None and not m.empty and "con_code" in m.columns:
+                            cur = m[m["out_date"].isna()] if "out_date" in m.columns else m
+                            return set(cur["con_code"].astype(str))
+                    except Exception:
+                        return set()
+                    return set()
+
+                # ⚠️ index_member 单独限速 20 次/秒（实测 8 路并行会触发
+                # "每秒最多访问该接口20次"导致约 1/3 行业取不到 → 匹配率掉到 ~70%）。
+                # 必须串行 + 间隔，不能与其它维度并行抢配额。
+                import time
+                member_sets = []
+                for r in sw_rows:
+                    member_sets.append((r[1], _members(r[0])))
+                    time.sleep(0.06)
+                for _name, _members_ in member_sets:
+                    for c in _members_:
+                        ind_map.setdefault(c, _name)
+                if ind_map:
+                    src_label = "申万2021一级"
         except Exception:
-            pass
+            ind_map = {}
 
-        industries = [{"ts_code": c, "industry": ind_map.get(c, "未知")} for c in codes]
         if not ind_map:
-            return DimensionResult.empty("行业分布", note="无法获取成分股行业信息")
+            # 回退：Tushare 自有分类（一次性查全市场，本地匹配，避免逐只查被限流）
+            try:
+                all_basic = self.api.get_stock_basic(list_status="L", fields="ts_code,name,industry")
+                if all_basic is not None and not all_basic.empty:
+                    ind_map = dict(zip(all_basic["ts_code"], all_basic["industry"]))
+            except Exception:
+                pass
+            if not ind_map:
+                return DimensionResult.empty("行业分布", note="无法获取成分股行业信息")
 
+        industries = [{"ts_code": c, "industry": ind_map.get(c, "未匹配" if src_label.startswith("申万") else "未知")} for c in codes]
         ind_df = pd.DataFrame(industries)
         sector_dist = ind_df["industry"].value_counts().head(10).reset_index()
         sector_dist.columns = ["行业", "成分股数量"]
@@ -288,13 +398,11 @@ class IndexAnalysisRunner:
         w_dist["权重占比%"] = w_dist["权重占比%"].round(2)
         sector_dist = sector_dist.merge(w_dist, on="行业", how="left")
 
-        matched_count = int((ind_df["industry"] != "未知").sum())
-        data = {"distribution": sector_dist.to_dict("records"), "total_members": len(codes), "matched": matched_count}
-        # ⚠️ 口径诚实标注：本维度用的是 stock_basic.industry（Tushare 自有分类），
-        # 不是申万 2021 版。SKILL 要求申万口径，但逐只映射申万需按行业指数拉成分、
-        # 成本高；在未实现申万映射前，先如实标注分类来源，避免冒充申万。
+        matched_count = int((ind_df["industry"] != ("未匹配" if src_label.startswith("申万") else "未知")).sum())
+        data = {"distribution": sector_dist.to_dict("records"), "total_members": len(codes), "matched": matched_count,
+                "industry_source": src_label}
         conclusion = (f"成分股覆盖 {len(ind_df)} 只（匹配行业 {matched_count} 只），"
-                      f"前三大行业（Tushare 分类，非申万）：{', '.join(sector_dist['行业'].head(3).tolist())}")
+                      f"前三大行业（{src_label}）：{', '.join(sector_dist['行业'].head(3).tolist())}")
         return DimensionResult.success("行业分布", conclusion=conclusion, data=data)
 
     # ---------- 维度：国际对比 ----------
@@ -683,7 +791,12 @@ class IndexAnalysisRunner:
 
         idx += 1
         lines.append(f"## {idx}. 整体分析评价")
-        lines.append(self._overall_evaluation())
+        try:
+            lines.append(self._overall_evaluation())
+        except Exception as e:
+            # 整体评价是装饰性汇总，任何异常都不该让整份报告崩溃（SKILL 部分失败原则）
+            print(f"[index_runner] 整体分析评价生成失败: {type(e).__name__}: {e}", file=sys.stderr)
+            lines.append("**整体分析评价**：部分维度数据不完整，本次未生成综合结论。")
         lines.append("")
         lines.append("---")
         lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对证券价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
@@ -958,7 +1071,9 @@ class IndexAnalysisRunner:
                 top1_w = dist[0].get("权重占比%", "N/A")
                 _wd_txt = f"（家数占比 {top1_cnt}%，权重占比 {top1_w}%）" if top1_w != "N/A" else f"（家数占比 {top1_cnt}%）"
                 _conc_basis = self._f(top1_w) if top1_w != "N/A" else self._f(top1_cnt)
-                lines.append(f"**分析评价**：前三大行业为{'、'.join(top3)}，第一大行业（{top1_name}）{_wd_txt}。" + ("权重口径集中度较高，指数走势受少数行业影响显著。" if _conc_basis is not None and _conc_basis > 20 else "权重口径下行业分布相对分散。"))
+                # 分类口径必须在报告中标注（申万2021 / Tushare回退）
+                _src = data.get("industry_source") or "分类口径未标注"
+                lines.append(f"**分析评价**：按{_src}分类，前三大行业为{'、'.join(top3)}，第一大行业（{top1_name}）{_wd_txt}。" + ("权重口径集中度较高，指数走势受少数行业影响显著。" if _conc_basis is not None and _conc_basis > 20 else "权重口径下行业分布相对分散。"))
             else:
                 lines.append("- 无法获取指数成分股")
 
