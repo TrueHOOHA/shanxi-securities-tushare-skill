@@ -22,6 +22,9 @@ _CSS = """
 :root{--ink:#1a1a1a;--accent:#2c6fbb;--muted:#5f656d;--faint:#9aa0a8;--border:#e6e8eb}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',system-ui,sans-serif;max-width:none;margin:0 auto;padding:0;color:var(--ink);line-height:1.75;background:#fff;-webkit-font-smoothing:antialiased}
+/* 目录点击/锚点跳转平滑滚动；尊重系统"减少动态效果"设置 */
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
 .layout{display:flex;gap:28px;max-width:1240px;margin:0 auto;padding:44px 24px 80px;align-items:flex-start}
 .content{flex:1;min-width:0}
 .toc{position:sticky;top:20px;flex:0 0 190px;max-height:calc(100vh - 40px);overflow:auto;font-size:12.5px;background:#fafbfc;border:1px solid var(--border);border-radius:10px;padding:12px 10px}
@@ -77,6 +80,21 @@ for (const [id, option] of Object.entries(CHARTS)) {
     chart.setOption(option);
     window.addEventListener("resize", () => chart.resize());
 }
+// 目录点击跳转：用 scrollIntoView 平滑滚动到目标章节，并同步高亮。
+// ⚠️ 不能只依赖原生 #hash 跳转：报告在 iframe 预览 / srcdoc / blob URL 场景下
+// 文档地址不是真实文件路径，点击 <a href="#sec-N"> 可能不触发滚动。
+// scrollIntoView 与文档地址无关，任何打开方式都可用；保留 href 作为降级。
+document.querySelectorAll('.toc a').forEach(_a => {
+    _a.addEventListener('click', _e => {
+        const _t = document.querySelector(_a.getAttribute('href'));
+        if (_t) {
+            _e.preventDefault();
+            _t.scrollIntoView({behavior: 'smooth', block: 'start'});
+            document.querySelectorAll('.toc a').forEach(_x => _x.classList.remove('active'));
+            _a.classList.add('active');
+        }
+    });
+});
 // 目录 scrollspy：滚动时高亮当前章节
 if (window.IntersectionObserver) {
     const _links = [...document.querySelectorAll('.toc a')];
