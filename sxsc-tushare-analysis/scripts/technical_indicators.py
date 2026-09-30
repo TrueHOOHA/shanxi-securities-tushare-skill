@@ -109,10 +109,16 @@ def calc_obv(df_close, df_vol):
 
 
 def calc_volume_ratio(df_vol, window=5):
-    """量比 = 当日成交量 / 近 N 日平均成交量。"""
+    """量比 = 当日成交量 / 近 N 日平均成交量（分母不含当日）。
+    数据不足 window+1 日（无法排除当日）时返回 None，不返回错误的近似值——
+    旧实现 tail(window+1).head(window) 在 len == window 时会把当日算进分母，
+    新股/新基金常见，量比被系统性低估。
+    """
     if len(df_vol) == 0:
         return None
-    ma_vol = df_vol.tail(window + 1).head(window).mean()
+    if len(df_vol) < window + 1:
+        return None
+    ma_vol = df_vol.iloc[-1 - window:-1].mean()
     if ma_vol == 0 or (isinstance(ma_vol, float) and np.isnan(ma_vol)):
         return None
     ratio = df_vol.iloc[-1] / ma_vol

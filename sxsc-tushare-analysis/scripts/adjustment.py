@@ -43,6 +43,10 @@ def apply_fund_adj(df_nav, df_adj):
         df_adj[["trade_date", "adj_factor"]].rename(columns={"trade_date": "nav_date"}),
         on="nav_date", how="left"
     ).sort_values("nav_date").drop_duplicates("nav_date", keep="last").set_index("nav_date")
+    # fund_adj 因子可能缺失最新 nav_date（数据滞后），左连接后该日 adj_factor=NaN，
+    # adj_nav 末行即 NaN、区间收益/夏普/回撤整表失效。因子单调递增，前向填充
+    # 用前一日因子是安全近似；口径与 apply_adj_factor / apply_etf_adj 保持一致。
+    merged["adj_factor"] = merged["adj_factor"].ffill()
     latest_factor = merged["adj_factor"].iloc[-1] if not merged.empty else 1.0
     if pd.isna(latest_factor):
         latest_factor = 1.0
@@ -126,10 +130,15 @@ def compare_returns(series_dict, periods=(20, 60, 120, 250)):
 # ============ 历史分位数 ============
 def calc_percentile_rank(value, historical_series):
     """计算当前值在历史序列中的百分位。
-    value: 当前值（如当前 PE）
+    value: 当前值（如当前 PE）；为 None/NaN/inf 时返回 None（数据缺失，不给分位）
     historical_series: 历史值序列（如近 5 年每日 PE）
     返回 0-100 的百分位数，如 85 表示当前值高于历史 85% 的时间。
     """
+    # 缺失值必须返回 None 而不是 0.0：NaN 参与比较恒为 False，
+    # 会算出"0% 分位（极低）"这类与事实相反的假信号（估值/盈利分位最危险）。
+    # 调用方虽有 _safe_float 前置过滤，但不能依赖它——本函数自身必须安全。
+    if value is None or not np.isfinite(value):
+        return None
     arr = np.array(historical_series.dropna())
     if len(arr) == 0:
         return None

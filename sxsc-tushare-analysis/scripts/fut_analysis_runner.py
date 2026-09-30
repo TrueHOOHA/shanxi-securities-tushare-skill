@@ -33,9 +33,12 @@ from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
 from technical_indicators import calc_boll, calc_kdj, calc_macd, calc_rsi
 
-# 交易所后缀 -> 中文名（用于持仓排名覆盖判断）
+# 交易所后缀 -> (服务端 exchange 代码, 中文名)
+# ⚠️ 原映射缺 INE（上海国际能源交易中心）与 GFEX（广州期货交易所），
+# SC.INE/LU.INE/SI.GFEX/LC.GFEX 会因 exchange=None 使 fut_basic 调用失败。
 EXCHANGE_MAP = {".ZCE": ("CZCE", "郑州商品交易所"), ".SHF": ("SHFE", "上海期货交易所"),
-                ".DCE": ("DCE", "大连商品交易所"), ".CFE": ("CFFEX", "中国金融期货交易所")}
+                ".DCE": ("DCE", "大连商品交易所"), ".CFE": ("CFFEX", "中国金融期货交易所"),
+                ".INE": ("INE", "上海国际能源交易中心"), ".GFEX": ("GFEX", "广州期货交易所")}
 # fut_holding 仅覆盖大商所
 HOLDING_COVERED = {".DCE"}
 
@@ -54,17 +57,22 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def _resolve_ts_code(ts_code: str, api: DataAPI) -> str:
-    """含后缀直接用；纯 symbol（如 SR/RB）按 fut_basic fut_type=2 匹配连续合约。"""
+    """含后缀直接用；纯 symbol（如 SR/RB）按 fut_basic fut_type=2 匹配连续合约。
+
+    ⚠️ fut_basic 的 exchange 是**必选**入参（服务端对缺 exchange 的调用返回错误），
+    纯 symbol 无法预知交易所，需逐个交易所尝试匹配。
+    """
     if "." in ts_code:
         return ts_code
-    try:
-        df = api.get_fut_basic(fut_type="2")
-        if df is not None and not df.empty and "symbol" in df.columns:
-            m = df[df["symbol"] == ts_code.upper()]
-            if not m.empty:
-                return str(m.iloc[0]["ts_code"])
-    except Exception:
-        pass
+    for _suf, (_ex, _) in EXCHANGE_MAP.items():
+        try:
+            df = api.get_fut_basic(exchange=_ex, fut_type="2")
+            if df is not None and not df.empty and "symbol" in df.columns:
+                m = df[df["symbol"] == ts_code.upper()]
+                if not m.empty:
+                    return str(m.iloc[0]["ts_code"])
+        except Exception:
+            continue
     return ts_code
 
 
@@ -153,7 +161,10 @@ class FutAnalysisRunner:
         ma = calc_ma(s); macd = calc_macd(s); rsi = calc_rsi(s)
         kdj = calc_kdj(h, low, s); boll = calc_boll(s)
         latest_close = float(s.iloc[-1])
-        latest_settle = _safe_float(daily.iloc[-1].get("settle")) if "settle" in daily.columns else None
+        # ⚠️ 最新结算价要先 dropna：最新交易日结算中时 settle 为 NaN，
+        # 直接取 iloc[-1] 会得到 NaN，经 _safe_float 变 None → 展示成"N/A"
+        _set = daily.dropna(subset=["settle"]) if "settle" in daily.columns else daily
+        latest_settle = _safe_float(_set.iloc[-1].get("settle")) if "settle" in daily.columns and not _set.empty else None
         latest_oi = _safe_float(daily.iloc[-1].get("oi")) if "oi" in daily.columns else None
         data = {"returns": ret, "latest_close": latest_close, "latest_settle": latest_settle,
                 "latest_oi": latest_oi, "volatility": vol, "max_drawdown": mdd, "sharpe": sh,
@@ -166,8 +177,11 @@ class FutAnalysisRunner:
                     "vol": daily["vol"].tolist() if "vol" in daily.columns else [],
                 },
             }
-        conclusion = (f"最新收盘 {latest_close}，近20日 {ret.get('近20日涨幅%','N/A')}%，"
-                      f"近250日 {ret.get('近250日涨幅%','N/A')}%，年化波动 {vol}%，最大回撤 {mdd}%。")
+        _r20 = ret.get("近20日涨幅%") if ret.get("近20日涨幅%") not in (None, "N/A") else "数据不足"
+        _r250 = ret.get("近250日涨幅%") if ret.get("近250日涨幅%") not in (None, "N/A") else "数据不足"
+        conclusion = (f"最新收盘 {latest_close}，近20日 {_r20}%，"
+                      f"近250日 {_r250}%，年化波动 {vol if vol is not None else '数据不足'}%，"
+                      f"最大回撤 {mdd if mdd is not None else '数据不足'}%。")
         return DimensionResult.success("行情趋势", conclusion=conclusion, data=data)
 
     # ---------- 维度：持仓分析 ----------
@@ -180,6 +194,10 @@ class FutAnalysisRunner:
         if self.main_contract:
             holding_df = self.api.get_fut_holding(self.main_contract, shift_date(self.end_date, -20), self.end_date)
         if (holding_df is None or holding_df.empty):
+            # ⚠️ 状态必须如实标注：拿不到持仓排名数据就是 EMPTY（含降级产物），
+            # 不能再返回 success——否则风险提示的"数据缺失说明"（status != SUCCESS）永不触发。
+            # fut_holding 现在按 symbol 查询（服务端 schema 是 symbol 非 ts_code，见 data_api），
+            # DCE 品种应能取到数据；取不到多数是该品种确实无持仓排名。
             note = (f"fut_holding 持仓排名接口仅覆盖大商所(DCE)，{EXCHANGE_MAP.get(suf,(None,'该交易所'))[1]}无持仓排名数据"
                     if not covered else "持仓排名数据暂缺（主力合约较新或接口未更新），已降级为持仓量(oi)序列")
             # 退而求其次：从日线取持仓量(oi)序列
@@ -205,7 +223,11 @@ class FutAnalysisRunner:
             _vr_txt = ("。" + "，".join(_vr_parts)) if _vr_parts else ""
             note = note.rstrip("。") + _vr_txt + ("。" if _vr_txt else "")
 
-            return DimensionResult.success("持仓分析", conclusion=note, data={"holding_records": None, "oi_series": (oi_series.tail(10).to_dict() if oi_series is not None else None), "vr_latest": vr_latest, "oi_chg5": oi_chg5})
+            return DimensionResult(
+                status=ResultStatus.EMPTY, title="持仓分析", conclusion=note, note=note,
+                data={"holding_records": None, "oi_series": (oi_series.tail(10).to_dict() if oi_series is not None else None),
+                      "vr_latest": vr_latest, "oi_chg5": oi_chg5},
+            )
         holding_df = holding_df.sort_values("trade_date") if "trade_date" in holding_df.columns else holding_df
         data = {"holding_records": holding_df.tail(20).to_dict("records"), "covered_exchange": True}
         return DimensionResult.success("持仓分析", data=data,
@@ -235,15 +257,19 @@ class FutAnalysisRunner:
             if w is not None and not w.empty and "symbol" in w.columns:
                 sr = w[w["symbol"] == self.symbol]
                 if not sr.empty and "vol" in sr.columns:
-                    rows.append({"trade_date": d, "覆盖仓库数": int(len(sr)), "vol": int(sr["vol"].sum())})
+                    # ⚠️ 单位随品种变化（仓单日报有 unit 字段，如锌=吨），不能一律写"张"
+                    _unit = str(sr.iloc[0].get("unit")) if "unit" in sr.columns else None
+                    rows.append({"trade_date": d, "覆盖仓库数": int(len(sr)), "vol": int(sr["vol"].sum()), "unit": _unit})
         if not rows:
             return DimensionResult.empty("仓单库存", note="无法获取仓单数据")
         wdf = pd.DataFrame(rows).sort_values("trade_date")
         chg = int(wdf["vol"].iloc[-1]) - int(wdf["vol"].iloc[0])
-        trend = "增加(可交割量上升，偏空)" if chg > 0 else "减少(可交割量下降，偏多)" if chg < 0 else "稳定"
+        # 合规：只陈述可交割量的增减，不下"偏空/偏多"的方向性判断
+        trend = "增加(可交割量上升)" if chg > 0 else "减少(可交割量下降)" if chg < 0 else "稳定"
         data = {"wsr_series": wdf.to_dict("records"), "chg": chg, "trend": trend}
         latest_vol = wdf["vol"].iloc[-1]
-        conclusion = f"最新仓单 {latest_vol} 张，近{len(wdf)}期变化 {chg:+d}，{trend}。"
+        _unit = (wdf["unit"].dropna().iloc[-1] if "unit" in wdf.columns and not wdf["unit"].dropna().empty else "张")
+        conclusion = f"最新仓单 {latest_vol} {_unit}，近{len(wdf)}期变化 {chg:+d} {_unit}，{trend}。"
         return DimensionResult.success("仓单库存", conclusion=conclusion, data=data)
 
     # ---------- 维度：结算参数 ----------
@@ -255,11 +281,16 @@ class FutAnalysisRunner:
         if fs is not None and not fs.empty:
             if "settle" in fs.columns:
                 fs = fs.sort_values("trade_date").dropna(subset=["settle"])
+                # ⚠️ 空表兜底：最新交易日结算中时 settle 全为 NaN，dropna 后为空表，
+                # 直接 iloc[-1] 会抛 IndexError 并把内部异常文本当报告正文展示
+                if fs.empty:
+                    fs = None
+        if fs is not None and not fs.empty:
             _lmr = _safe_float(fs.iloc[-1].get("long_margin_rate")) if "long_margin_rate" in fs.columns else None
             data = {"settle_records": fs.tail(5).to_dict("records"), "source": "fut_settle", "latest_margin_rate": _lmr}
             conclusion = f"结算参数来自 fut_settle（{code}），最新 {len(fs)} 条。"
             return DimensionResult.success("结算参数", conclusion=conclusion, data=data)
-        # 降级：从日线取结算价
+        # 降级：从日线取结算价（连续合约通常无 fut_settle 结算参数）
         trend = self.results.get("trend")
         latest_settle = None
         if trend and trend.is_ok() and trend.data:
@@ -271,10 +302,13 @@ class FutAnalysisRunner:
                 if not d.empty:
                     latest_settle = _safe_float(d.iloc[-1]["settle"])
         data = {"latest_settle": latest_settle, "source": "fut_daily(降级)"}
+        # 不直显 "N/A"：给出可解释的缺失文案
+        _settle_txt = f"最新结算 {latest_settle}" if latest_settle is not None else "最新结算价暂缺（最新交易日结算中或数据未更新）"
         return DimensionResult.success("结算参数", data=data,
-                                       conclusion=f"fut_settle 对连续/主力合约无数据，结算价取自 fut_daily：最新结算 {latest_settle if latest_settle else 'N/A'}。保证金率等参数暂缺。")
+                                       conclusion=f"fut_settle 对连续/主力合约无数据，结算价取自 fut_daily：{_settle_txt}。保证金率等参数暂缺。")
 
     # ---------- 维度：风险提示 ----------
+    @safe_result("风险提示")
     def analyze_risk(self) -> DimensionResult:
         risks = []
         trend = self.results.get("trend")
@@ -432,7 +466,7 @@ class FutAnalysisRunner:
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，基于 T-1 日历史数据，仅供技术交流与学习参考，不构成任何投资建议或财务指导。*")
+        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对期货价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
         return "\n".join(lines)
 
     def _render_dimension(self, res) -> list:
@@ -490,17 +524,22 @@ class FutAnalysisRunner:
                 _ws_df = pd.DataFrame(ws).rename(columns={"trade_date": "日期", "vol": "仓单量(张)"})
                 lines.append(self._md(_ws_df))
                 lines.append("")
-            lines.append(f"**分析评价**：仓单反映可交割量，{data.get('trend','')}。仓单增加压制价格(偏空)，减少支撑价格(偏多)。")
+            lines.append(f"**分析评价**：仓单反映可交割量水平，{data.get('trend','')}。仓单增减为库存变动的统计口径，不含对价格方向的判断。")
         elif res.title == "结算参数":
             src = data.get("source", "")
             if src.startswith("fut_settle"):
                 rec = data.get("settle_records", [])
                 if rec:
-                    _keep = [c for c in ["trade_date", "settle", "long_margin_rate", "short_margin_rate"] if c in rec[0]]
+                    # ⚠️ 保证金率是小数（如 0.07=7%），表格与正文必须统一展示为百分比，
+                    # 旧实现表格原样显示 0.07、正文却说 7%，自相矛盾。
+                    def _rate_pct(v):
+                        _f = _safe_float(v)
+                        return f"{_f * 100:.2f}%" if _f is not None and 0 < _f < 1 else self._fmt(v)
                     _recs = [{"日期": r.get("trade_date"), "结算价": self._fmt(r.get("settle")),
-                              "多头保证金率": self._fmt(r.get("long_margin_rate")), "空头保证金率": self._fmt(r.get("short_margin_rate"))} for r in rec]
+                              "多头保证金率": _rate_pct(r.get("long_margin_rate")),
+                              "空头保证金率": _rate_pct(r.get("short_margin_rate"))} for r in rec]
                     lines.append(self._md(pd.DataFrame(_recs)))
-                    _mr = self._f(_recs[-1].get("多头保证金率")) if _recs else None
+                    _mr = _safe_float(rec[-1].get("long_margin_rate")) if "long_margin_rate" in rec[-1] else None
                     if _mr and _mr > 0:
                         lines.append("")
                         lines.append(f"最新保证金率 {_mr*100:.0f}% → 名义杠杆约 {1/_mr:.1f} 倍（保证金交易，盈亏同步放大）。")
@@ -554,8 +593,8 @@ class FutAnalysisRunner:
         lines.append(f"**风格定位**：{name}属期货品种，受供需、季节性、宏观与政策等多因素影响，杠杆交易放大波动。")
         r250 = self._f(trend.data.get("returns", {}).get("近250日涨幅%")) if t_ok else None
         vol = self._f(trend.data.get("volatility")) if t_ok else None
-        concl = f"{name}{'波动较高' if vol and vol>30 else '波动适中'}，{'中期走势偏弱' if r250 and r250<0 else '中期走势平稳'}。期货分析需结合现货供需、仓单与持仓结构，以上为基于 T-1 历史数据的描述性分析，不构成投资建议。"
-        lines.append(f"**结论**：{concl}")
+        concl = f"{name}{'波动较高' if vol and vol>30 else '波动适中'}，近250日涨跌幅 {r250 if r250 is not None else 'N/A'}%。以上均为 T-1 历史数据的统计描述，不含对期货品种方向性判断或操作建议。"
+        lines.append(f"**数据汇总**：{concl}")
         return "\n".join(lines)
 
 

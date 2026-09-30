@@ -14,6 +14,7 @@
 """
 
 import os
+import sys
 import threading
 import time
 from collections import deque
@@ -21,6 +22,48 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
+
+
+# ---------- 数据通道提示 ----------
+# SDK 初始化失败会自动降级为 HTTP 协议。降级本身不影响取数结果，但必须显式暴露，
+# 否则日志与报告都看不出实际走的是哪条通道（曾出现 check_env 报 sdk、实际走 http 的情况）。
+_CHANNEL_NOTES: List[str] = []
+
+# ---------- 取数错误记录 ----------
+# 服务端对不存在的字段/非法参数会返回 {"code": 40101, "msg": "接口xxx不包含字段yyy"}。
+# 早期实现直接 `return None` 把 msg 丢掉了，使"字段名写错"与"确实没有数据"完全同形，
+# 下游只能静默降级——曾导致涨跌停/龙虎榜机构/游资/股东增减持四个子项永久取不到数据，
+# 而报告把它们呈现为"无记录"。这里统一留痕，供日志与报告页脚展示。
+_ERRORS: List[Dict[str, Any]] = []
+
+
+def _record_error(api_name: str, reason: str, detail: str = "") -> bool:
+    """记录一次取数失败。同一 (接口, 原因) 去重计数。返回是否为首见。"""
+    for e in _ERRORS:
+        if e["api"] == api_name and e["reason"] == reason:
+            e["count"] += 1
+            return False
+    _ERRORS.append({"api": api_name, "reason": reason, "detail": detail, "count": 1})
+    return True
+
+
+def data_channel_note() -> Optional[str]:
+    """返回本进程内数据通道的降级说明；无降级时返回 None。"""
+    return "；".join(dict.fromkeys(_CHANNEL_NOTES)) or None
+
+
+def data_errors() -> List[Dict[str, Any]]:
+    """返回本进程内取数失败记录（字段名错/参数错/权限不足等）；无失败时为空列表。"""
+    return [dict(e) for e in _ERRORS]
+
+
+def data_error_note(limit: int = 3) -> Optional[str]:
+    """取数失败的简要说明（供报告页脚展示），避免"取数失败"被当成"无数据"。"""
+    if not _ERRORS:
+        return None
+    items = [f"{e['api']}：{e['reason']}" for e in _ERRORS[:limit]]
+    more = f"，另有 {len(_ERRORS) - limit} 个接口失败" if len(_ERRORS) > limit else ""
+    return "；".join(items) + more
 
 
 # ---------- 工具函数 ----------
@@ -74,14 +117,22 @@ def drop_t0_placeholder(df: Optional[pd.DataFrame], price_cols: List[str] = ("cl
 
 
 def safe_call(func: Callable[..., pd.DataFrame], *args, **kwargs) -> Optional[pd.DataFrame]:
-    """统一 API 调用封装：异常和空结果都返回 None。"""
+    """统一 API 调用封装：异常和空结果都返回 None。
+
+    注意：返回值无法区分"接口报错"与"确实无数据"（历史设计，调用方依赖 None 判空）。
+    因此这里额外把失败原因记入 _ERRORS，异常不再彻底消失。
+    """
+    name = getattr(func, "__name__", "unknown")
     try:
         df = func(*args, **kwargs)
-        if df is None or df.empty:
-            return None
-        return df
-    except Exception:
+    except Exception as exc:
+        if _record_error(name, "调用异常", f"{type(exc).__name__}: {exc}"):
+            print(f"[data_api] 取数异常 {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
         return None
+    if df is None or df.empty:
+        # 空结果不是错误，但要与"报错"区分开：这里不记 _ERRORS
+        return None
+    return df
 
 
 # ---------- DataAPI 类 ----------
@@ -114,9 +165,13 @@ class DataAPI:
                 import sxsc_tushare as sx
                 sx.set_token(self.token)
                 self._pro = sx.get_api(env=self.env)
-            except Exception:
-                # SDK 初始化失败时降级为 HTTP
+            except Exception as exc:
+                # SDK 初始化失败时降级为 HTTP（记录并提示，避免静默降级）
                 self.mode = "http"
+                note = f"SDK 初始化失败，已降级为 HTTP 协议（{type(exc).__name__}: {exc}）"
+                if note not in _CHANNEL_NOTES:
+                    _CHANNEL_NOTES.append(note)
+                print(f"[data_api] {note}", file=sys.stderr)
 
     def _detect_mode(self) -> str:
         try:
@@ -143,8 +198,14 @@ class DataAPI:
         return None
 
     def _http_call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
-        """HTTP 通用调用。"""
+        """HTTP 通用调用。
+
+        服务端对不存在的字段/非法参数返回 code != 0 并附带 msg；早期实现把它丢掉了，
+        使"字段名写错"与"确实无数据"同形。现在记入 _ERRORS 并打 stderr（同一错误只打一次）。
+        """
         if not self.token:
+            if _record_error(api_name, "缺少 token", "环境变量 SXSC_TUSHARE_TOKEN 未设置"):
+                print("[data_api] 未设置 SXSC_TUSHARE_TOKEN，无法取数", file=sys.stderr)
             return None
         try:
             import requests
@@ -155,9 +216,14 @@ class DataAPI:
             )
             data = resp.json()
             if data.get("code") != 0:
+                msg = data.get("msg") or data.get("message") or f"code={data.get('code')}"
+                if _record_error(api_name, str(msg), f"params={params} fields={fields}"):
+                    print(f"[data_api] 取数失败 {api_name}: {msg}", file=sys.stderr)
                 return None
             return pd.DataFrame(data["data"]["items"], columns=data["data"]["fields"])
-        except Exception:
+        except Exception as exc:
+            if _record_error(api_name, f"HTTP 调用异常（{type(exc).__name__}）", str(exc)):
+                print(f"[data_api] HTTP 调用异常 {api_name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             return None
 
     def _call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
@@ -246,9 +312,16 @@ class DataAPI:
                           "ts_code,end_date,holder_num")
 
     def get_stk_holdertrade(self, ts_code: str, end_date: str, lookback_days: int = 180) -> Optional[pd.DataFrame]:
+        """大股东增减持（变动数量字段为 `change_vol`，单位：股）。
+
+        ⚠️ 原实现请求 `change_amount`，服务端 schema 无此列 → 40101 → 恒为空，
+        迫使增减持只能走 top10_holders 降级路径，且报告结论仍写"公告口径/近半年"。
+        增减方向用 `in_de`（IN 增持 / DE 减持）。
+        """
         start_date = shift_date(end_date, -lookback_days)
         return self._call("stk_holdertrade", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
-                          "ts_code,ann_date,holder_name,change_amount,change_ratio")
+                          "ts_code,ann_date,holder_name,holder_type,in_de,change_vol,change_ratio,"
+                          "after_share,after_ratio,avg_price,total_share")
 
     # ---------- 两融 ----------
 
@@ -270,8 +343,16 @@ class DataAPI:
                           "trade_date,ts_code,name,close,pct_change,amount,l_buy,l_sell,net_amount")
 
     def get_limit_list_d(self, trade_date: str) -> Optional[pd.DataFrame]:
+        """涨跌停列表（新）。
+
+        ⚠️ 字段名以服务端实际 schema 为准：服务端对不存在的字段直接返回 40101，
+        原实现请求的 `fc_ratio`/`fl_ratio` 并不存在，导致涨跌停记录**恒为空**，
+        而报告把它呈现为"该股无涨跌停记录"（实测：万科A 20260929 收于涨停价仍未被记录）。
+        """
         return self._call("limit_list_d", {"trade_date": trade_date},
-                          "trade_date,ts_code,name,close,pct_chg,fc_ratio,fl_ratio,fd_amount,first_time,last_time")
+                          "trade_date,ts_code,industry,name,close,pct_chg,amount,limit_amount,"
+                          "float_mv,total_mv,turnover_ratio,fd_amount,first_time,last_time,"
+                          "open_times,up_stat,limit_times,limit")
 
     # ---------- 解禁 ----------
 
@@ -283,8 +364,14 @@ class DataAPI:
     # ---------- 市场异动补充 ----------
 
     def get_top_inst(self, trade_date: str) -> Optional[pd.DataFrame]:
+        """龙虎榜机构明细。
+
+        ⚠️ 服务端实际 schema 为 exalter/side/buy/buy_rate/sell/sell_rate/net_buy/reason，
+        没有 name/b_amount/s_amount/net_amount（原实现四个字段全取错 → 机构明细恒为空）。
+        机构名称在 `exalter`，买卖净额在 `net_buy`。
+        """
         return self._call("top_inst", {"trade_date": trade_date},
-                          "trade_date,ts_code,name,b_amount,s_amount,net_amount,reason")
+                          "trade_date,ts_code,exalter,side,buy,buy_rate,sell,sell_rate,net_buy,reason")
 
 
     def get_stk_shock(self, ts_code: str, end_date: str, lookback_days: int = 250) -> Optional[pd.DataFrame]:
@@ -312,14 +399,23 @@ class DataAPI:
                           "trade_date,ts_code,pre_close,up_limit,down_limit")
 
     def get_hm_detail(self, ts_code: str, end_date: str, lookback_days: int = 120) -> Optional[pd.DataFrame]:
-        """游资每日明细（buy/sell/net_amount 单位：元）。"""
+        """游资每日明细（净额为 `buy_sell_count`，单位：元）。
+
+        ⚠️ 实测服务端 schema 与官方文档**完全不同**：
+          服务端真实列 = rank_date/ts_code/name/buy_num/sell_num/buy_sell_count/category/ins_name
+          文档所列字段 = trade_date/ts_name/buy_amount/sell_amount/net_amount/hm_name/hm_orgs/tag
+        原实现按文档请求 9 个字段（其中 8 个不存在）→ 服务端 40101 → 游资子项永久失效。
+        """
         start_date = shift_date(end_date, -lookback_days)
         return self._call("hm_detail", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
-                          "trade_date,ts_code,ts_name,buy_amount,sell_amount,net_amount,hm_name,hm_orgs,tag")
+                          "rank_date,ts_code,name,buy_num,sell_num,buy_sell_count,category,ins_name")
 
     def get_hm_list(self) -> Optional[pd.DataFrame]:
-        """游资名录（名称+简介）。"""
-        return self._call("hm_list", {}, "name,desc")
+        """游资名录。
+
+        ⚠️ 服务端实际 schema 为 category/description/relate_part（文档所写 name/desc 均不存在）。
+        """
+        return self._call("hm_list", {}, "category,description,relate_part")
 
     def get_suspend_d(self, ts_code: str, end_date: str, lookback_days: int = 60) -> Optional[pd.DataFrame]:
         """每日停复牌信息（suspend_type: S-停牌 R-复牌）。"""
@@ -388,8 +484,13 @@ class DataAPI:
                           "ts_code,trade_date,fd_share")
 
     def get_fund_div(self, ts_code: str) -> Optional[pd.DataFrame]:
+        """基金分红（含 div_proc 方案进度，供"只统计已实施"过滤）。
+
+        ⚠️ 原 fields 未请求 div_proc，调用方只能按 ex_date 去重，预案行（ex_date 为空）
+        会整组塌成 1 行仍被计数，分红次数/金额虚增。
+        """
         return self._call("fund_div", {"ts_code": ts_code},
-                          "ts_code,ann_date,ex_date,record_date,pay_date,div_cash")
+                          "ts_code,ann_date,div_proc,ex_date,record_date,pay_date,div_cash")
 
 
     def get_fund_company(self) -> Optional[pd.DataFrame]:
@@ -447,9 +548,14 @@ class DataAPI:
                           "ts_code,ann_date,holder_name,pledge_amount,start_date,end_date,is_release,pledgor,p_total_ratio,h_total_ratio")
 
     def get_stk_managers(self, ts_code: str) -> Optional[pd.DataFrame]:
-        """上市公司管理层（注：接口实际不返回 end_date，无法区分在任/离任，计数口径为全部披露记录）。"""
+        """上市公司管理层（含 `begin_date` 上任 / `end_date` 离任，可用于区分在任与离任）。
+
+        ⚠️ 原 docstring 断言"接口实际不返回 end_date"，与实测 schema 相反：
+        服务端确实返回 begin_date/end_date（默认显示=Y），漏取会使在任判定失效、
+        管理层人数把离任与历次披露一并计入而系统性高估。
+        """
         return self._call("stk_managers", {"ts_code": ts_code},
-                          "ts_code,ann_date,name,gender,lev,title,edu,national")
+                          "ts_code,ann_date,name,gender,lev,title,edu,national,birthday,begin_date,end_date")
 
     def get_stk_rewards(self, ts_code: str) -> Optional[pd.DataFrame]:
         """管理层薪酬和持股（按报告期）。"""
@@ -474,7 +580,14 @@ class DataAPI:
                           "ts_code,trade_date,price,vol,amount,buyer,seller")
 
     def get_repurchase(self, ts_code: str, end_date: str, lookback_days: int = 365) -> Optional[pd.DataFrame]:
-        """股票回购。接口无 ts_code 入参，按公告日期区间取全市场后本地过滤；vol 万股、amount 万元。"""
+        """股票回购。接口无 ts_code 入参，按公告日期区间取全市场后本地过滤。
+
+        ⚠️ 单位与口径（实测校准）：
+          · `amount` 单位是**元**（不是万元）、`vol` 单位是**股**（不是万股）。
+          · 同一回购计划的多条公告是**累计快照**（vol/amount 随 ann_date 单调递增，
+            增量÷增量股数落在当日 high_limit/low_limit 区间内），**禁止对多条记录求和**。
+          · `proc` 为「预案」「股东大会通过」的记录属未实施计划，不计入已回购金额。
+        """
         start_date = shift_date(end_date, -lookback_days)
         df = self._call("repurchase", {"start_date": start_date, "end_date": end_date},
                         "ts_code,ann_date,end_date,proc,exp_date,vol,amount,high_limit,low_limit")
@@ -574,6 +687,12 @@ class DataAPI:
 
     def get_fut_basic(self, exchange: Optional[str] = None, fut_type: Optional[str] = None,
                       ts_code: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """期货合约信息。
+
+        ⚠️ `exchange` 文档标注为**必选**：实测不传 exchange 时服务端返回 None（不是空表），
+        因此"只传 fut_type=2"取连续合约列表会失败；原 docstring 声称可全量取，与实测不符。
+        调用方请带上 exchange，或对 None 结果做兜底。
+        """
         params = {k: v for k, v in [("exchange", exchange), ("fut_type", fut_type), ("ts_code", ts_code)]
                   if v is not None}
         return self._fut_sdk_call("fut_basic", params)
@@ -585,8 +704,16 @@ class DataAPI:
     def get_fut_mapping(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         return self._fut_sdk_call("fut_mapping", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date})
 
-    def get_fut_holding(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-        return self._fut_sdk_call("fut_holding", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date})
+    def get_fut_holding(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """每日成交持仓排名（前 20 会员多空持仓）。
+
+        ⚠️ 入参是 `symbol`（产品代码如 JM/RB），**不是 `ts_code`**：文档入参表里没有 ts_code，
+        实测传 ts_code（如 JM.DCE）服务端返回 None，导致持仓排名恒为空，
+        而报告却把代码错误解释成"该交易所无持仓数据"。
+        为兼容原有调用，这里接受带交易所后缀的代码并自动取 symbol 部分。
+        """
+        sym = symbol.split(".")[0] if symbol else symbol
+        return self._fut_sdk_call("fut_holding", {"symbol": sym, "start_date": start_date, "end_date": end_date})
 
     def get_fut_wsr(self, trade_date: str) -> Optional[pd.DataFrame]:
         return self._fut_sdk_call("fut_wsr", {"trade_date": trade_date})

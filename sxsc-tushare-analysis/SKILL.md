@@ -86,7 +86,7 @@ description: >
 | 2 | 行情趋势 | `daily`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数)；周线/月线由日线重采样（不单独取 `weekly`/`monthly`） | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**基准对比**：对沪深300及所属行业指数计算相同口径的涨跌幅、年化波动率、最大回撤、夏普比率，与标的并列对比（判断超额收益与相对风险） |
 | 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业)、`index_member`(行业成分股)、`dividend`(近3年实施分红) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值、近3年分红次数与累计每股分红（cash_div_tax 为每股税前口径）；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_member` 取成分股 → 各取 `daily_basic` PE/PB，先 `winsorize_cross_section` 截面去极值再求均值/中位数，避免单只异常股拉偏）；**PE/PB 双口径分位**（`valuation_percentiles`：近 5 年历史分位 + 当日同行业截面分位，双口径背离时需找原因） |
 | 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`**、`express`(业绩快报)、`fina_audit`(审计意见)、`disclosure_date`(披露计划) | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）**；业绩快报（早于定期报告的营收/净利同比）；审计意见（非标准无保留→风险信号）；下一期财报预定披露日（事件窗口） |
-| 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`**、`hsgt_top10`(北向十大成交)、`repurchase`(回购)、`broker_recommend`(券商金股) | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向；沪深股通十大成交股上榜次数与净买入（`net_amount` 单位：元）、近一年回购金额（万元）、近3个月券商金股入选（month 必选按月查询后本地过滤） |
+| 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`**、`hsgt_top10`(北向十大成交)、`repurchase`(回购)、`broker_recommend`(券商金股) | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向；沪深股通十大成交股上榜次数与净买入（`net_amount` 单位：元）、近一年回购金额（**元**，累计快照取最新已实施值，勿求和；`proc` 为预案/股东大会通过的不计）、近3个月券商金股入选（month 必选按月查询后本地过滤） |
 | 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`**、`pledge_stat`/`pledge_detail`(股权质押)、`stk_managers`/`stk_rewards`(管理层) | 前十大股东/流通股东集中度、**股东户数时间序列分析（筹码集中度指标）**、大股东增减持方向与比例；股权质押比例（>30% 为偏高风险信号）；高管披露记录（`stk_managers` 实际不返回 end_date、含历史记录，现任规模以 `stk_rewards` 最新报告期披露人数为准）与薪酬持股 |
 ### 筹码集中度分析（股东户数时间序列）
 
@@ -345,7 +345,7 @@ description: >
   - `daily_basic` 的 `total_mv` 字段单位为**万元**，换算亿元需 `/1e4`
   - `margin_detail` 的 `rzye` 字段单位为**元**，换算亿元需 `/1e8`
   - `hm_detail` 的 `net_amount` 单位为**元**；`hsgt_top10` 的 `net_amount` 单位为**元**
-  - `repurchase` 的 `amount` 单位为**万元**；接口无 ts_code 入参，按公告日期区间取全市场后本地过滤
+  - `repurchase` 的 `amount` 单位为**元**（**非万元**），且同一回购计划的多条公告为**累计快照**（`vol`/`amount` 随 `ann_date` 单调递增，增量÷增量股数落在当日 `high_limit`/`low_limit` 区间内）——**取最新一条已实施记录的 `amount` 作为累计已回购金额，禁止对多条记录求和**；`proc` 为「预案」「股东大会通过」的属未实施计划，不计入已回购金额。接口无 ts_code 入参，按公告日期区间取全市场后本地过滤
   - `daily_info` 的 `amount` 单位为**亿元**；`sz_daily_info` 的 `amount` 单位为**元**（换算亿元需 `/1e8`，两接口口径不同；板块口径：沪市 `SH_A`、深市 `股票`）
   - `dividend` 的 `cash_div_tax` 为**每股**分红（税前），非每10股口径；`div_proc` 需筛"实施"
   - `broker_recommend` 的 `month`（YYYYMM）为**必选**入参，按月循环查询后本地过滤标的

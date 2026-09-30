@@ -66,16 +66,20 @@ def calc_sharpe(df_nav, risk_free=0.02, periods=250):
 
 
 def calc_sortino(df_nav, risk_free=0.02, periods=250):
-    """Sortino 比率（仅用下行波动率，比 Sharpe 更合理）。"""
+    """Sortino 比率（分母用全样本下行偏差，MAR 与分子无风险利率同口径）。
+    下行偏差 = sqrt(mean(min(r - MAR, 0)^2))，MAR = risk_free / periods（与分子的
+    无风险利率一致）；旧实现用"负收益子集的样本标准差（围绕负收益均值）"，
+    既非标准下行偏差，又与分子 rf、MAR=0 的口径不一致，会系统性高估 Sortino。
+    """
     ret = df_nav.pct_change().dropna()
     if len(ret) < 2:
         return None
     annual_ret = ret.mean() * periods
-    downside = ret[ret < 0]
-    if len(downside) == 0 or downside.std() == 0:
+    mar = risk_free / periods  # 与分子 rf 同口径；rf=0 时即 MAR=0
+    downside_dev = np.sqrt(np.mean(np.minimum(ret - mar, 0) ** 2))  # 全样本，未达标收益计 0
+    if downside_dev == 0:
         return None
-    annual_downside_std = downside.std() * np.sqrt(periods)
-    return round((annual_ret - risk_free) / annual_downside_std, 2)
+    return round((annual_ret - risk_free) / (downside_dev * np.sqrt(periods)), 2)
 
 
 def calc_information_ratio(stock_returns, benchmark_returns, periods=250):
@@ -91,17 +95,27 @@ def calc_information_ratio(stock_returns, benchmark_returns, periods=250):
 def calc_roe_trend(df):
     """ROE 趋势。df: fina_indicator 结果，返回最近 8 期（按 end_date 升序）。
     按 end_date 去重（fina_indicator 同报告期可能返回多条不同 report_type 行）。
+    排序键含 ann_date：同报告期有多条（如财报更正）时必须保留公告日最新的那条，
+    只按 end_date 排序会退化为"按输入顺序"、可能保留更旧的 ROE。
+    口径与 adjustment.clean_panel、attribution._filter_annual 一致。
     """
-    df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
+    if "ann_date" in df.columns:
+        df = df.sort_values(["end_date", "ann_date"]).drop_duplicates("end_date", keep="last")
+    else:
+        df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
     return df[["end_date", "roe", "grossprofit_margin", "netprofit_margin"]].tail(8)
 
 
 def calc_revenue_growth(df):
     """营收/利润同比增速。df: income 结果（含 total_revenue, n_income_attr_p）。
     假设传入为季度报告序列，pct_change(4) 即同报告期去年同期的同比口径；
-    若传入年度数据应改用 pct_change(1)。先按 end_date 去重，避免重复报告期失真。
+    若传入年度数据应改用 pct_change(1)。先按 end_date+ann_date 去重，
+    避免重复报告期失真、并保留公告日最新（更正后）的那条。
     """
-    df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
+    if "ann_date" in df.columns:
+        df = df.sort_values(["end_date", "ann_date"]).drop_duplicates("end_date", keep="last")
+    else:
+        df = df.sort_values("end_date").drop_duplicates("end_date", keep="last")
     df["rev_yoy"] = df["total_revenue"].pct_change(4) * 100
     df["profit_yoy"] = df["n_income_attr_p"].pct_change(4) * 100
     return df[["end_date", "rev_yoy", "profit_yoy"]].tail(8)

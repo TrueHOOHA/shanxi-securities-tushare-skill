@@ -22,7 +22,9 @@ def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
     stock = np.asarray(aligned["stock"], dtype=float)
     market = np.asarray(aligned["market"], dtype=float)
     cov = np.cov(stock, market)[0, 1]
-    var = np.var(market)
+    # ddof=1：与 OLS 回归口径一致；np.var 默认 ddof=0（总体方差）会把 Beta
+    # 系统性放大 n/(n-1)（n=60 时约 1.7%），与滚动 Beta 也不一致
+    var = np.var(market, ddof=1)
     if var == 0:
         return None
     beta = round(float(cov / var), 2)
@@ -39,15 +41,34 @@ def calc_beta_alpha(stock_returns, market_returns, risk_free=0.02, periods=250):
 
 
 # ============ 财务健康评分：Piotroski F-Score ============
+def _norm_end_date(df, date_col="end_date"):
+    """把报告期列规范为 'YYYYMMDD' 字符串，供跨表按报告期对齐。
+    datetime64 列若直接 astype(str) 会得到 '2023-12-31'（endswith('1231') 判定失败、
+    跨表字符串也不相等），必须先按日期格式化成 8 位；已是字符串/整数的保持原样。
+    返回新列（不修改入参）。
+    """
+    col = df[date_col]
+    if pd.api.types.is_datetime64_any_dtype(col):
+        return col.dt.strftime("%Y%m%d")
+    s = col.astype(str)
+    # Tushare 有时把日期返回成 20231231.0 这样的浮点字符串，去掉小数尾巴
+    return s.where(~s.str.match(r"^\d+\.0$"), s.str.slice(0, -2))
+
+
 def _filter_annual(df, date_col="end_date"):
-    """筛年报并去重：保留 end_date 以 '1231' 结尾的年报，同报告期保留最新公告。"""
+    """筛年报并去重：保留 end_date 为 12-31 的年报，同报告期保留最新公告。
+    兼容 end_date 为字符串（'20231231'）与 datetime64/datetime 两种类型。
+    """
     if df is None or len(df) == 0:
         return df
-    df = df[df[date_col].astype(str).str.endswith("1231")].copy()
+    df = df.copy()
+    df[date_col] = _norm_end_date(df, date_col)
+    # 规范后为 'YYYYMMDD'（datetime）或原样字符串，两种类型都只认 1231 结尾
+    df = df[df[date_col].str.endswith("1231")].copy()
     if df.empty:
         return df
     if "ann_date" in df.columns:
-        df = df.sort_values(["end_date", "ann_date"]).drop_duplicates(date_col, keep="last")
+        df = df.sort_values([date_col, "ann_date"]).drop_duplicates(date_col, keep="last")
     else:
         df = df.drop_duplicates(date_col, keep="last")
     return df.sort_values(date_col)
@@ -69,6 +90,10 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     ROA 取值口径：优先 npta(总资产净利润，Piotroski 净利口径)，次选 roa(EBIT 口径，
     部分金融业为空)，最后用 n_income_attr_p/total_assets 自算——兼容证券/银行等 roa 字段为空的标的。
 
+    ⚠️ 跨表对齐：以 fina_indicator 的当期/上期 end_date 为锚，其余表按 end_date 精确取数。
+    各表披露进度常不一致（income/cashflow 慢一期），按"最后一行"取数会让第 4 项
+    "经营现金流>净利润"退化成跨年度比较；某表缺该报告期时该项记"数据缺失"，不静默错配年份。
+
     9 项标准：
       盈利能力   1) ROA>0  2) 经营现金流>0  3) ΔROA>0  4) 经营现金流>净利润(应计质量)
       杠杆/流动/融资 5) Δ资产负债率≤0  6) Δ流动比率>0  7) 未新增股本(Δtotal_share≤0)
@@ -83,81 +108,87 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     score = 0
     details = []
 
-    def _val(df, col, pos):
-        if df is None or col not in df.columns or len(df) < abs(pos):
+    # 报告期锚点：以 fina_indicator 最近两期年报 end_date 为准（_filter_annual 已按升序排列）
+    cur_date = df_fina["end_date"].iloc[-1] if df_fina is not None and len(df_fina) >= 2 else None
+    prev_date = df_fina["end_date"].iloc[-2] if df_fina is not None and len(df_fina) >= 2 else None
+
+    def _val_at(df, col, end_date):
+        """按报告期精确取数；该表没有这一期就返回 None（不要退回"最后一行"）。"""
+        if df is None or end_date is None or col not in df.columns or "end_date" not in df.columns:
             return None
-        v = df[col].iloc[pos]
+        hit = df[df["end_date"] == end_date]
+        if hit.empty:
+            return None
+        v = hit[col].iloc[-1]
         return v if pd.notna(v) else None
 
-    def _get_roa(pos):
+    def _get_roa(end_date):
         # 优先 npta(净利口径)，次选 roa(EBIT 口径，金融业常空)，最后用 净利润/总资产 自算
-        v = _val(df_fina, "npta", pos)
+        v = _val_at(df_fina, "npta", end_date)
         if v is None:
-            v = _val(df_fina, "roa", pos)
+            v = _val_at(df_fina, "roa", end_date)
         if v is None:
-            ni_ = _val(df_income, "n_income_attr_p", pos)
-            ta_ = _val(df_balances, "total_assets", pos) if df_balances is not None else None
+            ni_ = _val_at(df_income, "n_income_attr_p", end_date)
+            ta_ = _val_at(df_balances, "total_assets", end_date)
             if ni_ is not None and ta_ not in (None, 0, 0.0):
                 v = ni_ / ta_ * 100
         return v
 
-    CUR, PREV = -1, -2
-
     # 1. ROA > 0
-    roa = _get_roa(CUR)
+    roa = _get_roa(cur_date)
     s = roa is not None and roa > 0
     score += s; details.append(f"ROA>0: {'是' if s else ('否' if roa is not None else '数据缺失')}")
 
     # 2. 经营现金流 > 0
-    cfo = _val(df_cashflow, "n_cashflow_act", CUR)
+    cfo = _val_at(df_cashflow, "n_cashflow_act", cur_date)
     s = cfo is not None and cfo > 0
     score += s; details.append(f"经营现金流>0: {'是' if s else ('否' if cfo is not None else '数据缺失')}")
 
     # 3. ΔROA > 0
-    roa_prev = _get_roa(PREV)
+    roa_prev = _get_roa(prev_date)
     if roa is None or roa_prev is None:
         details.append("ΔROA>0: 数据不足")
     else:
         s = roa > roa_prev; score += s; details.append(f"ΔROA>0: {'是' if s else '否'}")
 
-    # 4. 经营现金流 > 净利润（盈利质量）
-    ni = _val(df_income, "n_income_attr_p", CUR)
+    # 4. 经营现金流 > 净利润（盈利质量）——两者必须取同一报告期
+    ni = _val_at(df_income, "n_income_attr_p", cur_date)
     if cfo is None or ni is None:
-        details.append("现金流>净利润: 数据缺失")
+        details.append("现金流>净利润: 数据缺失(该报告期数据未披露)")
     else:
         s = cfo > ni; score += s; details.append(f"现金流>净利润: {'是' if s else '否'}")
 
     # 5. Δ资产负债率 ≤ 0（杠杆下降）
-    da = _val(df_fina, "debt_to_assets", CUR); da_prev = _val(df_fina, "debt_to_assets", PREV)
+    da = _val_at(df_fina, "debt_to_assets", cur_date); da_prev = _val_at(df_fina, "debt_to_assets", prev_date)
     if da is None or da_prev is None:
         details.append("Δ资产负债率≤0: 数据不足")
     else:
         s = da <= da_prev; score += s; details.append(f"Δ资产负债率≤0: {'是' if s else '否'}")
 
     # 6. Δ流动比率 > 0
-    cr = _val(df_fina, "current_ratio", CUR); cr_prev = _val(df_fina, "current_ratio", PREV)
+    cr = _val_at(df_fina, "current_ratio", cur_date); cr_prev = _val_at(df_fina, "current_ratio", prev_date)
     if cr is None or cr_prev is None:
         details.append("Δ流动比率>0: 数据不足")
     else:
         s = cr > cr_prev; score += s; details.append(f"Δ流动比率>0: {'是' if s else '否'}")
 
     # 7. 未新增股本
-    sh = _val(df_balances, "total_share", CUR) if df_balances is not None else None
-    sh_prev = _val(df_balances, "total_share", PREV) if df_balances is not None else None
+    sh = _val_at(df_balances, "total_share", cur_date)
+    sh_prev = _val_at(df_balances, "total_share", prev_date)
     if sh is None or sh_prev is None:
         details.append("未新增股本: 数据缺失(未提供资产负债表)")
     else:
         s = sh <= sh_prev; score += s; details.append(f"未新增股本: {'是' if s else '否'}")
 
     # 8. Δ毛利率 > 0
-    gm = _val(df_fina, "grossprofit_margin", CUR); gm_prev = _val(df_fina, "grossprofit_margin", PREV)
+    gm = _val_at(df_fina, "grossprofit_margin", cur_date); gm_prev = _val_at(df_fina, "grossprofit_margin", prev_date)
     if gm is None or gm_prev is None:
         details.append("Δ毛利率>0: 数据不足")
     else:
         s = gm > gm_prev; score += s; details.append(f"Δ毛利率>0: {'是' if s else '否'}")
 
     # 9. Δ总资产周转率 > 0
-    at = _val(df_fina, "assets_turn", CUR); at_prev = _val(df_fina, "assets_turn", PREV)
+    at = _val_at(df_fina, "assets_turn", cur_date); at_prev = _val_at(df_fina, "assets_turn", prev_date)
     if at is None or at_prev is None:
         details.append("Δ总资产周转率>0: 数据不足")
     else:
@@ -194,7 +225,7 @@ def calc_event_study(stock_returns, market_returns, event_date, window_before=30
 
     s = np.asarray(est["stock"], dtype=float)
     m = np.asarray(est["market"], dtype=float)
-    v = np.var(m)
+    v = np.var(m, ddof=1)  # ddof=1 与 OLS/calc_beta_alpha 口径一致
     if v == 0:
         return None
     beta = np.cov(s, m)[0, 1] / v

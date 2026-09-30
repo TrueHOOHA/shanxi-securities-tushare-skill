@@ -133,7 +133,8 @@ class FundAnalysisRunner:
             if df_daily is None or df_daily.empty:
                 return DimensionResult.empty("净值走势", note="无法获取 ETF 行情")
 
-            df = apply_etf_adj(df_daily, df_adj) if df_adj is not None else df_daily.sort_values("trade_date").set_index("trade_date")
+            _use_adj = df_adj is not None and not df_adj.empty
+            df = apply_etf_adj(df_daily, df_adj) if _use_adj else df_daily.sort_values("trade_date").set_index("trade_date")
             nav_series = df["close_post"] if "close_post" in df.columns else df["close"]
             nav_series = nav_series.sort_index()
             latest_nav = _safe_float(df_daily.sort_values("trade_date").iloc[-1]["close"])
@@ -144,7 +145,8 @@ class FundAnalysisRunner:
             if df_nav is None or df_nav.empty:
                 return DimensionResult.empty("净值走势", note="无法获取基金净值")
 
-            df = apply_fund_adj(df_nav, df_adj) if df_adj is not None else df_nav.sort_values("nav_date").set_index("nav_date")
+            _use_adj = df_adj is not None and not df_adj.empty
+            df = apply_fund_adj(df_nav, df_adj) if _use_adj else df_nav.sort_values("nav_date").set_index("nav_date")
             nav_series = df["adj_nav"] if "adj_nav" in df.columns else df["unit_nav"]
             nav_series = nav_series.sort_index()
             latest_nav = _safe_float(df_nav.sort_values("nav_date").iloc[-1]["unit_nav"])
@@ -190,15 +192,18 @@ class FundAnalysisRunner:
             conclusion += f"，最新折溢价 {etf_check['premium_discount_pct']:+.2f}%（收盘价 vs 单位净值）"
         if etf_check and etf_check.get("tracking_error_ann_pct") is not None:
             conclusion += f"，年化跟踪误差 {etf_check['tracking_error_ann_pct']:.2f}%（基准 {etf_check.get('benchmark_code')}）"
+        # ⚠️ 口径诚实标注：无复权因子时序列退化为未复权价，标题/图例不能再自称"复权"
+        _adj_label = "复权" if _use_adj else "未复权（缺复权因子）"
         return DimensionResult.success("净值走势", conclusion=conclusion, data={
             "latest_nav": latest_nav,
             "returns": returns,
             "etf_check": etf_check,
+            "used_adjusted": _use_adj,
             "chart": {
-                "title": "净值走势（复权）",
+                "title": f"净值走势（{_adj_label}）",
                 "type": "line",
                 "dates": [str(d) for d in nav_series.index.tolist()],
-                "series": [{"name": "复权净值", "data": [round(float(v), 4) for v in nav_series.tolist()]}],
+                "series": [{"name": f"{_adj_label}净值", "data": [round(float(v), 4) for v in nav_series.tolist()]}],
             },
         })
 
@@ -210,14 +215,22 @@ class FundAnalysisRunner:
 
         if _is_etf(self.ts_code):
             df = self.api.get_fund_daily(self.ts_code, start, self.end_date)
+            if df is None or df.empty:
+                return DimensionResult.empty("业绩指标", note="无法获取 ETF 行情")
             adj_df = self.api.get_fund_adj(self.ts_code, start, self.end_date)
-            series_key = "close_post" if adj_df is not None else "close"
-            nav_series = (apply_etf_adj(df, adj_df)[series_key] if adj_df is not None else df.set_index("trade_date")["close"]).sort_index()
+            # ⚠️ 空 DataFrame ≠ None：get_fund_adj 无数据时返回空表，
+            # 不能只判 `is not None`——空表喂给 apply_*_adj 会产生全 NaN 序列
+            _use_adj = adj_df is not None and not adj_df.empty
+            series_key = "close_post" if _use_adj else "close"
+            nav_series = (apply_etf_adj(df, adj_df)[series_key] if _use_adj else df.drop_duplicates("trade_date").set_index("trade_date")["close"]).sort_index()
         else:
             df = self.api.get_fund_nav(self.ts_code, start, self.end_date)
+            if df is None or df.empty:
+                return DimensionResult.empty("业绩指标", note="无法获取基金净值")
             adj_df = self.api.get_fund_adj(self.ts_code, start, self.end_date)
-            series_key = "adj_nav" if adj_df is not None else "unit_nav"
-            nav_series = (apply_fund_adj(df, adj_df)[series_key] if adj_df is not None else df.set_index("nav_date")["unit_nav"]).sort_index()
+            _use_adj = adj_df is not None and not adj_df.empty
+            series_key = "adj_nav" if _use_adj else "unit_nav"
+            nav_series = (apply_fund_adj(df, adj_df)[series_key] if _use_adj else df.drop_duplicates("nav_date").set_index("nav_date")["unit_nav"]).sort_index()
 
         if nav_series is None or len(nav_series) < 2:
             return DimensionResult.empty("业绩指标", note="净值数据不足")
@@ -227,8 +240,12 @@ class FundAnalysisRunner:
             "max_drawdown": calc_max_drawdown(nav_series),
             "sharpe": calc_sharpe(nav_series),
         }
+        # 数值兜底：None/NaN 不能打印成 "None%" / "nan%"
+        def _fmt_v(v):
+            return v if (v is not None and not (isinstance(v, float) and np.isnan(v))) else "数据不足"
         conclusion = (
-            f"年化波动 {data['volatility']}%，最大回撤 {data['max_drawdown']}%，夏普 {data['sharpe']}"
+            f"年化波动 {_fmt_v(data['volatility'])}%，最大回撤 {_fmt_v(data['max_drawdown'])}%，"
+            f"夏普 {_fmt_v(data['sharpe'])}"
         )
         return DimensionResult.success("业绩指标", conclusion=conclusion, data=data)
 
@@ -267,9 +284,12 @@ class FundAnalysisRunner:
         if df is None or df.empty:
             return DimensionResult.empty("持仓分析", note="无法获取基金持仓")
 
-        df = df.sort_values("ann_date").reset_index(drop=True)
-        latest = df.iloc[-1]
-        latest_period = latest.get("end_date")
+        # ⚠️ 最新报告期按 end_date 取最大值，不能 sort_values("ann_date").iloc[-1]：
+        # ann_date 为 NaN 的行在 pandas 里排最后，会选中最旧的一期（实测选到 20241231
+        # 而非 20250630），使持仓分析、风险维度的第一大重仓都用陈旧数据。
+        _d = df.dropna(subset=["end_date"])
+        latest_period = _d["end_date"].max()
+        latest = df[df["end_date"] == latest_period].sort_values("ann_date").iloc[-1]
 
         # 最新一期持仓，按占股票市值比排序
         latest_holdings = df[df["end_date"] == latest_period].sort_values("stk_mkv_ratio", ascending=False).head(10)
@@ -301,6 +321,10 @@ class FundAnalysisRunner:
         }
         total = data.get("top10_total_ratio", "N/A")
         conclusion = f"最新报告期 {latest_period}，前十大重仓占比合计约 {total}%"
+        # ⚠️ 数据质量标注：持仓 ratio 全 0/None 常见于 IPO 打新微量持仓或接口数据异常，
+        # 不能当正常持仓分析（SKILL 明确要求标注"数据异常"）
+        if holdings and all(not h["ratio"] for h in holdings):
+            conclusion += "；前十大持仓占比均为 0/缺失，持仓数据异常或仅为打新微量持仓，不宜作正常持仓解读"
         return DimensionResult.success("持仓分析", conclusion=conclusion, data=data)
 
     # ---------- 维度：规模变化 ----------
@@ -369,7 +393,7 @@ class FundAnalysisRunner:
             "split_note": split_note,
             "latest_scale_yi": latest_scale_yi,
         }
-        conclusion = f"最新份额 {latest_share:,.2f} 万份"
+        conclusion = f"最新份额 {latest_share:,.2f} 万份" if latest_share is not None else "最新份额 数据缺失"
         if len(share_changes) >= 2:
             first = share_changes[0]["fd_share"]
             last = share_changes[-1]["fd_share"]
@@ -392,6 +416,13 @@ class FundAnalysisRunner:
         df = self.api.get_fund_div(self.ts_code)
         if df is None or df.empty:
             return DimensionResult.empty("分红", note="该基金无分红记录（fund_div接口未覆盖或基金确实未进行现金分红，部分ETF通过净值增长体现收益）")
+
+        # ⚠️ 只统计"已实施"分红：fund_div 的 div_proc 含"预案/实施/完成"等多进度记录，
+        # 只按 ex_date 去重会把预案行（ex_date 为空）整组塌成 1 行仍计入次数。
+        if "div_proc" in df.columns:
+            df = df[df["div_proc"].astype(str).str.contains("实施|完成", na=False)].copy()
+            if df.empty:
+                return DimensionResult.empty("分红", note="该基金暂无已实施的分红记录")
 
         df = df.sort_values("ann_date").reset_index(drop=True)
         # fund_div 可能返回重复行（同一除息日多行），按 ex_date 去重避免虚增次数与累计金额
@@ -436,11 +467,26 @@ class FundAnalysisRunner:
             return DimensionResult.empty("同类对比", note="无法获取基金类型")
 
         # ETF 优先选同后缀场内基金，再用本基金名称关键词缩窄到同主题，避免混入其他行业ETF
-        fetch_fields = "ts_code,name,fund_type,found_date"
+        fetch_fields = "ts_code,name,fund_type,found_date,market"
         peer_scope = self.fund_type
+        # ⚠️ fund_basic 的入参只有 market/status，`fund_type` 是**输出字段**不是入参：
+        # 实测传 {"fund_type": ...} 服务端忽略并返回全市场约 15000 条（等同没过滤），
+        # 对场外 .OF 基金还会混入场内 ETF。稳妥做法：按市场取回后本地按 fund_type 列过滤。
+        _market = "E" if _is_etf(self.ts_code) else "O"
+        _all = self.api._call("fund_basic", {"market": _market, "status": "L"}, fetch_fields)
+
+        def _filter_pool(df):
+            if df is None or df.empty or "fund_type" not in df.columns:
+                return df
+            _t = str(self.fund_type)
+            hit = df[df["fund_type"].astype(str) == _t]
+            if hit.empty:
+                hit = df[df["fund_type"].astype(str).str.contains(_t, na=False)]
+            return hit
+
         if _is_etf(self.ts_code):
             suffix = self.ts_code[-3:]  # .SH or .SZ
-            peers_df = self.api._call("fund_basic", {"fund_type": self.fund_type}, fetch_fields)
+            peers_df = _filter_pool(_all)
             if peers_df is not None and not peers_df.empty:
                 peers_df = peers_df[peers_df["ts_code"].str.endswith(suffix)].copy()
             keywords = self._extract_peer_keywords(self.fund_name)
@@ -461,7 +507,7 @@ class FundAnalysisRunner:
                     peers_df = narrow
                     peer_scope = f"同主题({'/'.join(keywords)})"
         else:
-            peers_df = self.api._call("fund_basic", {"fund_type": self.fund_type}, fetch_fields)
+            peers_df = _filter_pool(_all)
         if peers_df is None or peers_df.empty:
             return DimensionResult.empty("同类对比", note="无法获取同类基金列表")
 
@@ -590,7 +636,12 @@ class FundAnalysisRunner:
                 ],
             }
         rank20 = own_row.get("近20日%排名%", "N/A")
-        conclusion = f"同类基金({peer_scope})共 {len(peer_df)} 只，本基金近20日收益排名约 {rank20}% 分位"
+        # 排名口径：{col}排名% = 收益高于本基金的同类占比（击败百分比），越大越好
+        conclusion = f"同类基金({peer_scope})共 {len(peer_df)} 只"
+        if rank20 not in ("N/A", None):
+            conclusion += f"，本基金近20日收益优于约 {rank20}% 的同类"
+        else:
+            conclusion += "，近20日同类排名数据不足"
         return DimensionResult.success("同类对比", conclusion=conclusion, data=data)
 
     # ---------- 维度：动量质量（因子化，自包含取数） ----------
@@ -650,6 +701,7 @@ class FundAnalysisRunner:
 
     # ---------- 维度：风险提示 ----------
 
+    @safe_result("风险提示")
     def analyze_risk(self) -> DimensionResult:
         risks = []
         notes = []
@@ -884,7 +936,7 @@ class FundAnalysisRunner:
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，基于 T-1 日历史数据，仅供技术交流与学习参考，不构成任何投资建议或财务指导。*")
+        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对基金净值走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
         return "\n".join(lines)
 
     def _overall_evaluation(self) -> str:
@@ -958,7 +1010,7 @@ class FundAnalysisRunner:
             rank = own.get("近20日%排名%", "N/A")
             total_peers = peer.data.get("peer_total") or len(peer.data.get("peers", []))
             scope = peer.data.get("scope") or self.fund_type or "同类"
-            points.append(f"- **同类**：{scope}共 {total_peers} 只，近20日排名 {self._fmt(rank)}% 分位")
+            points.append(f"- **同类**：{scope}共 {total_peers} 只，近20日收益优于约 {self._fmt(rank)}% 的同类")
         if div and div.is_ok() and div.data:
             count = div.data.get("count", "N/A")
             total_div = self._fmt(div.data.get("total_div_cash"))
@@ -1001,10 +1053,10 @@ class FundAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，上述特征的历史表现随市场环境变化。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**数据汇总**：{name}{'，'.join(concl_parts)}。以上均为 T-1 历史数据的统计描述，不含对基金方向性判断或操作建议。")
         else:
             lines.append("")
-            lines.append(f"**结论**：{name}当前各项指标平稳，未现显著风险信号。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**数据汇总**：{name}当前各项指标平稳，未现显著风险信号。以上均为 T-1 历史数据的统计描述，不含对基金方向性判断或操作建议。")
 
         # ---- 因子综合评分 + 三维定位 + 风险预算 ----
         try:
@@ -1028,9 +1080,10 @@ class FundAnalysisRunner:
                 mdd = self._f(self._v(perf.data, "max_drawdown"))
                 vol = self._f(self._v(perf.data, "volatility"))
                 budget = calc_risk_budget(None, mdd, None, None, vol)
-                if budget.get("suggested_position_pct") is not None:
+                if budget.get("risk_level"):
                     lines.append("")
-                    lines.append(f"**风险预算**：{budget['risk_level']}风险等级（参考风险承受度约 {budget['suggested_position_pct']}%，基于回撤/波动测算，为风险评估参考，非配置建议）")
+                    # 合规：只列风险因子的客观测算值与定性等级，不给出仓位/配置比例
+                    lines.append(f"**风险因子测度**：风险等级 {budget['risk_level']}（由回撤/波动/流动性等因子综合测算，为数据统计结果，不含仓位或配置建议）")
                     for r in budget.get("reasons", []):
                         lines.append(f"- {r}")
         except Exception:
@@ -1121,7 +1174,18 @@ class FundAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(_clean).rename(columns={"ts_code": "基金代码"})))
             rank = own.get("近20日%排名%", "N/A")
             lines.append("")
-            lines.append(f"**分析评价**：本基金近20日收益排名约 {self._fmt(rank)}% 分位，" + ("处于同类前1/3" if self._f(rank) and self._f(rank) < 33 else "处于同类中游" if self._f(rank) and self._f(rank) < 67 else "处于同类后1/3") + "。")
+            # 排名口径：{col}排名% 是"击败百分比"（收益高于本基金的同类占比），
+            # 越大越好——旧实现用 <33 判"前1/3"，方向反了（+25% 收益被判"后1/3"）
+            _rk = self._f(rank)
+            if _rk is None:
+                _pos = "同类排名数据不足"
+            elif _rk > 67:
+                _pos = "处于同类前1/3"
+            elif _rk < 33:
+                _pos = "处于同类后1/3"
+            else:
+                _pos = "处于同类中游"
+            lines.append(f"**分析评价**：本基金近20日收益优于约 {self._fmt(rank)}% 的同类（{_pos}）。")
 
         elif res.title == "基金经理":
             rows = [
@@ -1157,6 +1221,8 @@ class FundAnalysisRunner:
                     _row = {"季度": c.get("quarter", "N/A"), "份额(万份)": self._fmt(c.get("fd_share"))}
                     if _prev is not None and _prev and c.get("fd_share"):
                         _row["环比%"] = f"{(c['fd_share'] / _prev - 1) * 100:+.1f}"
+                    else:
+                        _row["环比%"] = "无上期可比"  # 首期无环比，不直显 N/A
                     s_rows.append(_row)
                     _prev = c.get("fd_share")
                 lines.append(self._md(pd.DataFrame(s_rows)))

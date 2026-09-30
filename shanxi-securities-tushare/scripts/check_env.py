@@ -33,17 +33,40 @@ def _sdk_version():
         return None
 
 
+def _sdk_init_error(token):
+    """尝试用与 DataAPI 相同的方式初始化 SDK，返回 None 表示可用，否则返回失败原因。
+
+    ⚠️ 只判 import 成功不代表 SDK 可用：sxsc_tushare.set_token() 会把 token 缓存写
+    到用户主目录（如 jsdata_tk.csv），在沙箱/只读主目录下会 PermissionError，
+    导致 DataAPI 静默降级为 HTTP——而 check_env 此前仍报 mode=sdk，与实际运行不符。
+    """
+    if not token:
+        return "token 未设置"
+    try:
+        import sxsc_tushare as sx
+        sx.set_token(token)
+        _api = sx.get_api(env="prd")
+        return None
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
 def run_check():
     """执行一次真实校验，返回结果 dict。"""
     token = os.getenv(TOKEN_ENV)
     sdk_available = importlib.util.find_spec(SDK_NAME) is not None
     sdk_version = _sdk_version() if sdk_available else None
+    sdk_init_err = _sdk_init_error(token) if sdk_available else None
 
     return {
         "token_set": bool(token),
         "sdk_available": sdk_available,
         "sdk_version": sdk_version,
-        "mode": "sdk" if sdk_available else "http",
+        "sdk_init_ok": sdk_init_err is None if sdk_available else False,
+        "sdk_init_error": sdk_init_err,
+        # mode 以"能否真正初始化"为准，而不是"能否 import"：
+        # import 成功但 set_token 写缓存失败（沙箱/只读主目录）时 DataAPI 会走 HTTP
+        "mode": "sdk" if (sdk_available and sdk_init_err is None) else "http",
         "checked_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -84,11 +107,19 @@ def main():
         cached = load_cache()
         token_now = bool(os.getenv(TOKEN_ENV))
         if cached and cached.get("token_set") and token_now:
-            print("使用缓存校验结果（token 已实时确认）：")
-            print(json.dumps(cached, ensure_ascii=False, indent=2))
-            if not cached.get("sdk_available"):
-                print("\n提示：未安装 sxsc_tushare 库，将使用 HTTP 协议方式调取数据。")
-            return 0
+            # 旧版缓存没有 sdk_init_ok 字段（mode 只按 import 判定，与实际运行不符），
+            # 必须刷新而不是复用，否则会继续给出误导性的 mode=sdk
+            if "sdk_init_ok" not in cached:
+                cached = None
+            else:
+                print("使用缓存校验结果（token 已实时确认）：")
+                print(json.dumps(cached, ensure_ascii=False, indent=2))
+                if not cached.get("sdk_available"):
+                    print("\n提示：未安装 sxsc_tushare 库，将使用 HTTP 协议方式调取数据。")
+                elif not cached.get("sdk_init_ok"):
+                    print(f"\n提示：SDK 已安装但初始化失败（{cached.get('sdk_init_error') or '未知原因'}），"
+                          "将使用 HTTP 协议方式调取数据。")
+                return 0
 
     # 缓存未命中或 token 未设置：实时检测
     result = run_check()
@@ -105,6 +136,9 @@ def main():
         return 1
     if not result["sdk_available"]:
         print("\n提示：未安装 sxsc_tushare 库，将使用 HTTP 协议方式调取数据。")
+    elif not result["sdk_init_ok"]:
+        print(f"\n提示：SDK 已安装但初始化失败（{result.get('sdk_init_error') or '未知原因'}），"
+              "将使用 HTTP 协议方式调取数据。")
     return 0
 
 

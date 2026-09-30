@@ -125,7 +125,8 @@ class IndexAnalysisRunner:
                     "sharpe": bench_sharpe,
                 }
 
-        conclusion = f"近20日涨幅 {returns.get('近20日涨幅%', 'N/A')}%，年化波动 {volatility}%，最大回撤 {max_dd}%"
+        conclusion = "近20日涨幅 " + (f"{returns.get('近20日涨幅%')}%" if returns.get('近20日涨幅%') not in (None, "N/A") else "数据不足")
+        conclusion += f"，年化波动 {volatility if volatility is not None else '数据不足'}%，最大回撤 {max_dd if max_dd is not None else '数据不足'}%"
         data = {
             "returns": returns,
             "ma": ma,
@@ -147,8 +148,10 @@ class IndexAnalysisRunner:
     @safe_result("估值分析")
     def analyze_valuation(self) -> DimensionResult:
         # index_dailybasic 对部分指数（如科创50）不可用
-        # 取近 5 年估值序列（~1250 自然日），不足时按实际返回量降级标注
-        start = shift_date(self.end_date, -250 * 5)
+        # 取近 5 年估值序列。⚠️ 注意：shift_date 是自然日，5 年 = 365*5 自然日；
+        # 旧实现写 -250*5 会只取到约 3.4 年（1250 自然日 ≈ 856 交易日），
+        # "近5年"分位实际是"近3年多"的分位。不足时按实际返回量降级标注。
+        start = shift_date(self.end_date, -365 * 5)
         df = self.api.get_index_dailybasic(self.ts_code, start, self.end_date)
         if df is None or df.empty:
             # 不做聚合估算：无 index_dailybasic 官方指数级估值数据即判 empty，不编造数据
@@ -156,7 +159,9 @@ class IndexAnalysisRunner:
 
         df = df.sort_values("trade_date").reset_index(drop=True)
         latest = df.iloc[-1]
-        pe_raw = _safe_float(latest.get("pe"))
+        # ⚠️ PE 取 TTM 口径：SKILL 要求 PE(TTM)；服务端返回 pe（静态）与 pe_ttm 两列，
+        # 优先 pe_ttm，缺时才回退静态 pe（与股票 runner 的估值口径一致）
+        pe_raw = _safe_float(latest.get("pe_ttm")) or _safe_float(latest.get("pe"))
         pe = round(pe_raw, 2) if pe_raw is not None else None
         pb_raw = _safe_float(latest.get("pb"))
         pb = round(pb_raw, 2) if pb_raw is not None else None
@@ -169,7 +174,9 @@ class IndexAnalysisRunner:
         pb_hist = None
         if hist_count >= 250:
             if pe is not None:
-                pe_hist = round((df["pe"] < pe).sum() / len(df) * 100, 1)
+                pe_hist = round((df["pe_ttm"].fillna(df["pe"]) < pe).sum() / len(df) * 100, 1) if "pe_ttm" in df.columns else None
+                if pe_hist is None:
+                    pe_hist = round((df["pe"] < pe).sum() / len(df) * 100, 1)
             if pb is not None:
                 pb_hist = round((df["pb"] < pb).sum() / len(df) * 100, 1)
         hist_note = f"（数据不足，仅 {hist_count} 日）" if hist_count < 250 else ""
@@ -180,19 +187,21 @@ class IndexAnalysisRunner:
             "type": "line",
             "dates": df["trade_date"].tolist(),
             "series": [
-                {"name": "PE", "yAxisIndex": 0, "data": df["pe"].tolist()},
+                {"name": "PE", "yAxisIndex": 0, "data": (df["pe_ttm"].fillna(df["pe"]) if "pe_ttm" in df.columns else df["pe"]).tolist()},
                 {"name": "PB", "yAxisIndex": 1, "data": df["pb"].tolist()},
             ],
         }
-        conclusion = f"PE {pe if pe is not None else 'N/A'}，PB {pb if pb is not None else 'N/A'}"
+        # 不直显 "N/A"：无值时分位给出原因（数据不足/无 PE），PE/PB 本身缺失时给出明确口径
+        conclusion = f"PE(TTM) {pe if pe is not None else '数据缺失'}"
+        conclusion += f"，PB {pb if pb is not None else '数据缺失'}"
         if pe_hist is not None:
             conclusion += f"，PE近5年历史分位 {pe_hist}%"
         elif pe is not None and hist_count < 250:
-            conclusion += f"，PE近5年历史分位 N/A{hist_note}"
+            conclusion += f"，PE近5年历史分位{hist_note}"
         if pb_hist is not None:
             conclusion += f"，PB近5年历史分位 {pb_hist}%"
         elif pb is not None and hist_count < 250:
-            conclusion += f"，PB近5年历史分位 N/A{hist_note}"
+            conclusion += f"，PB近5年历史分位{hist_note}"
         return DimensionResult.success("估值分析", conclusion=conclusion, data=data)
 
     # ---------- 维度：成分权重 ----------
@@ -281,7 +290,11 @@ class IndexAnalysisRunner:
 
         matched_count = int((ind_df["industry"] != "未知").sum())
         data = {"distribution": sector_dist.to_dict("records"), "total_members": len(codes), "matched": matched_count}
-        conclusion = f"成分股覆盖 {len(ind_df)} 只（匹配行业 {matched_count} 只），前三大行业：{', '.join(sector_dist['行业'].head(3).tolist())}"
+        # ⚠️ 口径诚实标注：本维度用的是 stock_basic.industry（Tushare 自有分类），
+        # 不是申万 2021 版。SKILL 要求申万口径，但逐只映射申万需按行业指数拉成分、
+        # 成本高；在未实现申万映射前，先如实标注分类来源，避免冒充申万。
+        conclusion = (f"成分股覆盖 {len(ind_df)} 只（匹配行业 {matched_count} 只），"
+                      f"前三大行业（Tushare 分类，非申万）：{', '.join(sector_dist['行业'].head(3).tolist())}")
         return DimensionResult.success("行业分布", conclusion=conclusion, data=data)
 
     # ---------- 维度：国际对比 ----------
@@ -334,8 +347,10 @@ class IndexAnalysisRunner:
     @safe_result("两融/市场杠杆")
     def analyze_margin(self) -> DimensionResult:
         # 上交所全市场两融汇总
-        sse_df = self.api.get_margin(self.end_date, exchange_id="SSE")
-        szse_df = self.api.get_margin(self.end_date, exchange_id="SZSE")
+        # 近一年两融：250 交易日 ≈ 365 自然日（shift_date 是自然日），
+        # 用默认 lookback_days=250（自然日 ≈ 166 交易日）会显著短于"近一年"
+        sse_df = self.api.get_margin(self.end_date, exchange_id="SSE", lookback_days=365)
+        szse_df = self.api.get_margin(self.end_date, exchange_id="SZSE", lookback_days=365)
 
         def _summary(df):
             if df is None or df.empty:
@@ -436,6 +451,7 @@ class IndexAnalysisRunner:
 
     # ---------- 维度：风险提示 ----------
 
+    @safe_result("风险提示")
     def analyze_risk(self) -> DimensionResult:
         risks = []
         notes = []
@@ -670,7 +686,7 @@ class IndexAnalysisRunner:
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，基于 T-1 日历史数据，仅供技术交流与学习参考，不构成任何投资建议或财务指导。*")
+        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对证券价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
         return "\n".join(lines)
 
     def _overall_evaluation(self) -> str:
@@ -786,10 +802,8 @@ class IndexAnalysisRunner:
         concl_parts = []
         if val_ok:
             pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            if pe_hist is not None and pe_hist > 70:
-                concl_parts.append("估值处于历史高位，需警惕回调风险")
-            elif pe_hist is not None and pe_hist < 20:
-                concl_parts.append("估值处于历史低位，具备一定安全边际")
+            if pe_hist is not None:
+                concl_parts.append(f"PE 处于历史分位 {pe_hist}%")
         if trend_ok:
             vol = self._f(self._v(trend.data, "volatility"))
             mdd = self._f(self._v(trend.data, "max_drawdown"))
@@ -800,10 +814,10 @@ class IndexAnalysisRunner:
 
         if concl_parts:
             lines.append("")
-            lines.append(f"**结论**：{name}{'，'.join(concl_parts)}。综合来看，上述特征的历史表现随市场环境变化。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**数据汇总**：{name}{'，'.join(concl_parts)}。以上均为 T-1 历史数据的统计描述，不含对指数方向性判断或操作建议。")
         else:
             lines.append("")
-            lines.append(f"**结论**：{name}当前各项指标相对中性。以上为基于 T-1 历史数据的描述性分析，不构成投资建议。")
+            lines.append(f"**数据汇总**：{name}当前各项指标相对中性。以上均为 T-1 历史数据的统计描述，不含对指数方向性判断或操作建议。")
 
         # ---- 因子综合评分 + 三维定位 + 风险预算 ----
         try:
@@ -828,9 +842,10 @@ class IndexAnalysisRunner:
                 mdd = self._f(self._v(trend.data, "max_drawdown"))
                 vol = self._f(self._v(trend.data, "volatility"))
                 budget = calc_risk_budget(None, mdd, None, None, vol)
-                if budget.get("suggested_position_pct") is not None:
+                if budget.get("risk_level"):
                     lines.append("")
-                    lines.append(f"**风险预算**：{budget['risk_level']}风险等级（参考风险承受度约 {budget['suggested_position_pct']}%，基于回撤/波动测算，为风险评估参考，非配置建议）")
+                    # 合规：只列风险因子的客观测算值与定性等级，不给出仓位/配置比例
+                    lines.append(f"**风险因子测度**：风险等级 {budget['risk_level']}（由回撤/波动/Beta/流动性/VaR 等因子综合测算，为数据统计结果，不含仓位或配置建议）")
                     for r in budget.get("reasons", []):
                         lines.append(f"- {r}")
         except Exception:

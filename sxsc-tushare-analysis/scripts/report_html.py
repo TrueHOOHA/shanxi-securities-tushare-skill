@@ -12,6 +12,7 @@
 """
 import html as _html
 import json
+import math
 import re
 from datetime import datetime
 
@@ -39,12 +40,16 @@ p{font-size:13.5px;margin-bottom:10px}
 p.ph{margin-top:20px}
 p em{color:var(--muted);font-size:12px}
 .table-wrap{overflow-x:auto;margin:14px 0 8px;border:1px solid var(--border);border-radius:8px}
-table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
-thead th{padding:8px 12px;font-weight:600;color:#333;text-align:left;background:#f7f8f9;border-bottom:1.5px solid #333;white-space:nowrap;letter-spacing:.02em}
-tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
-td.r{text-align:right;white-space:nowrap}
+/* 固定布局 + 等分列宽：表头与数据列按列数均分，数值列右对齐 */
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px;font-variant-numeric:tabular-nums}
+thead th{padding:8px 12px;font-weight:600;color:#333;text-align:left;background:#f7f8f9;border-bottom:1.5px solid #333;word-break:break-word;letter-spacing:.02em}
+tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top;word-break:break-word}
+td.r{text-align:right;word-break:keep-all;overflow-wrap:anywhere}
 th.r{text-align:right}
-tbody td:first-child{white-space:normal;word-break:break-word;min-width:8em;max-width:26em;font-weight:500;padding-right:22px}
+tbody td:first-child{font-weight:500;padding-right:22px}
+/* 两列表：首列收窄、值列留白，避免内容被拉向两端 */
+table.col-2 th:first-child,table.col-2 td:first-child{width:34%}
+table.col-2 th:not(:first-child),table.col-2 td:not(:first-child){width:66%}
 tbody tr:nth-child(even){background:#fafbfc}
 tbody tr:hover{background:#eef4fb}
 tbody tr:last-child td{border-bottom:none}
@@ -93,6 +98,65 @@ if (window.IntersectionObserver) {
 """
 
 
+# ---------- 内联脚本序列化 ----------
+
+
+def _json_default(o):
+    """json.dumps 的兜底：numpy 标量/数组转原生类型（数字仍是数字），其余转字符串。
+
+    图表数据来自 pandas（np.int64 / np.bool_ / Timestamp / pd.NA 等），
+    这些都不是 JSON 原生类型；没有兜底时 json.dumps 会抛 TypeError 让整页渲染失败。
+    """
+    tolist = getattr(o, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()  # ndarray / Series → 原生 list
+        except Exception:
+            pass
+    item = getattr(o, "item", None)
+    if callable(item):
+        try:
+            v = item()  # numpy 标量 → Python 标量，保住数值类型
+            if v is None or isinstance(v, (str, int, float, bool)):
+                return v
+        except Exception:
+            pass
+    return str(o)
+
+
+def _json_script(obj) -> str:
+    r"""序列化为可安全内联进 <script> 的 JSON 文本。
+
+    必须把 `<` 转义为 `\u003c`：图表标题/序列名里一旦出现 `</script>`
+    （股东名、指数名、基金名含 `<` 时很常见）就会提前闭合脚本标签，
+    其后内容被浏览器当 HTML 解析，图表脚本失效且可注入任意标签。
+    `>`、`&`、U+2028/2029 同理转义；转义后的 `\u003c` 在 JS 字符串里仍是字面 `<`，
+    JS 取到的值不变，只是源码里不再出现可闭合标签的字符。
+    """
+    s = json.dumps(obj, ensure_ascii=False, default=_json_default)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"),
+                    ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        s = s.replace(ch, esc)
+    return s
+
+
+# ---------- 数值占位 ----------
+
+# 缺失/非数值的统一占位：不再输出 "nan" / "N/A%" 这类半成品文案
+_NA_TEXT = "—"
+
+
+def _num_text(v, digits=2, suffix=""):
+    """安全数值格式化：None / NaN / inf / 非数值一律返回统一占位，绝不抛异常。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return _NA_TEXT
+    if not math.isfinite(f):
+        return _NA_TEXT
+    return f"{f:,.{digits}f}{suffix}"
+
+
 def _inline(text):
     """行内 markdown → HTML（code / 加粗 / 斜体），先转义再套标签。"""
     s = _html.escape(text)
@@ -115,35 +179,87 @@ def _is_block_start(s):
 
 
 _NUM_RE = re.compile(r"^[-+]?[0-9][0-9,]*(?:\.[0-9]+)?(?:%|亿|万|万亿|元)?$")
+# 缺失/无数据占位符：这些值不参与数值列判定，但单元格本身仍需与同列数字对齐
+_MISSING = {"N/A", "-", "—", "NA", "None", "nan"}
+# 含中文（含全角标点）的单元格一律视为文本：数值列不应出现中文描述
+_HAS_CJK = re.compile(r"[\u4e00-\u9fff\uff00-\uffef]")
+# 日期（YYYYMMDD / YYYY-MM-DD / YYYY-MM）：形似数字但属文本列，须左对齐
+_DATE_RE = re.compile(r"^\d{4}-?\d{2}(-\d{2})?$")
+# 表头日期/标识列关键词（中英文）：这些列的值即便形似数字也按文本左对齐
+_DATE_KEY = re.compile(
+    r"(日期|时间|日$|date|trade_date|end_date|ann_date|start_date|float_date|ex_date)", re.I)
+
+
+# 单元格切分：裸 `|` 是列分隔符，`\|` 是转义（评级「AAA|AA+」等值必须能原样落在单元格里）
+_PIPE_SPLIT = re.compile(r"(?<!\\)\|")
+
+
+def _split_row(s):
+    r"""按裸管道切分表格行，`\|` 转义还原为字面 `|`。
+
+    原先直接 split("|")：`| 债券 | AAA\|AA+ |` 会被切成 3 段，
+    table-layout:fixed 下多出的单元格把整表挤错位。
+    """
+    body = s.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    while body.endswith("|"):
+        # 行尾裸 | 是分隔符；`\|` 属单元格内容，反斜杠为奇数个时不能剥
+        bs = 0
+        k = len(body) - 2
+        while k >= 0 and body[k] == "\\":
+            bs += 1
+            k -= 1
+        if bs % 2:
+            break
+        body = body[:-1]
+    return [c.replace("\\|", "|").strip() for c in _PIPE_SPLIT.split(body)]
 
 
 def _md_table(lines, i):
     """解析从 lines[i] 起的管道表格；数值列自动右对齐，返回 (html, 下一行下标)。"""
-    raw = lambda s: [c.strip() for c in s.strip().strip("|").split("|")]
-    header = raw(lines[i])
+    header = _split_row(lines[i])
     j = i + 1
     if j < len(lines) and re.fullmatch(r"[\s|:\-]+", lines[j].strip()):
         j += 1  # 表头分隔行
     rows = []
     while j < len(lines) and lines[j].strip().startswith("|"):
-        rows.append(raw(lines[j]))
+        rows.append(_split_row(lines[j]))
         j += 1
 
-    # 数值列判定：该列全部单元格匹配数值模式才算（含 N/A 视为非数值列）
-    numeric = []
-    for col in range(len(header)):
+    # 每行单元格数必须与表头一致：多则截断（否则 fixed 布局整表错位），少则补空
+    ncol = len(header)
+    rows = [(r + [""] * ncol)[:ncol] for r in rows]
+
+    # 逐列判定右对齐：以「整列」为单位，禁止逐单元格切换——否则同列内
+    # 文本左对齐、数字右对齐会左右横跳（概况表「员工数/注册资本」即此类）。
+    # 判定用「该列不含中文文本」而非占比：占比法会把
+    # {简称, 员工数 34,992, 注册资本 12.50亿} 这类文本列误判为数值列。
+    def _is_numeric_col(col):
+        # 表头参与判定：「除权除息日」「end_date」等已明示为日期/标识列，
+        # 其值即使形如 20240619 也应按文本左对齐
+        if _DATE_KEY.search(header[col]):
+            return False
         vals = [r[col] for r in rows if col < len(r) and r[col]]
-        numeric.append(bool(vals) and all(_NUM_RE.match(v) for v in vals))
+        if not vals:
+            return False
+        if any(_HAS_CJK.search(v) or _DATE_RE.match(v) for v in vals):
+            return False  # 含中文或日期 → 文本列，左对齐
+        return any(_NUM_RE.match(v) or v in _MISSING for v in vals)
+
+    numeric = [_is_numeric_col(c) for c in range(len(header))]
     cls = lambda col: " class='r'" if col < len(numeric) and numeric[col] else ""
 
-    head = "".join(f"<th{cls(col)}>{_inline(header[col])}</th>" for col in range(len(header)))
+    head = "".join(f"<th{cls(col)}>{_inline(header[col])}</th>" for col in range(ncol))
     body = ""
     for r in rows:
+        # 行已在上面按 ncol 截断/补齐，故 td 数恒等于表头列数，不再单独补缺列
         cells_html = "".join(
             f"<td{cls(col)}>{_inline(c)}</td>" for col, c in enumerate(r))
-        cells_html += "<td></td>" * (len(header) - len(r))  # 补足缺列
         body += f"<tr>{cells_html}</tr>"
-    return (f"<div class='table-wrap'><table><thead><tr>{head}</tr></thead>"
+    # col-2 供 CSS 收窄首列，其余表型沿用 fixed 布局均分
+    return (f"<div class='table-wrap'><table class='col-{ncol}'>"
+            f"<thead><tr>{head}</tr></thead>"
             f"<tbody>{body}</tbody></table></div>", j)
 
 
@@ -151,13 +267,17 @@ def df_to_md_table(df):
     """已格式化的 DataFrame → GFM 管道表格（替代 to_markdown，无 tabulate 依赖）。"""
     if df is None or df.empty:
         return ""
-    header = [str(c) for c in df.columns]
+    # 值里的裸 | 必须转义成 \|（_split_row 会还原），否则它被当成列分隔符：
+    # 行内单元格数多于表头，截断后数据静默丢失；换行同理会把一行拆成两行破坏表格
+    def _cell(v):
+        return " ".join(str(v).splitlines()).replace("|", "\\|")
+    header = [_cell(c) for c in df.columns]
     lines = [
         "| " + " | ".join(header) + " |",
         "|" + "|".join(["---"] * len(header)) + "|",
     ]
     for row in df.astype(str).values.tolist():
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append("| " + " | ".join(_cell(v) for v in row) + " |")
     return "\n".join(lines)
 
 
@@ -334,17 +454,20 @@ def _pie_option(c):
 def _chart_options(results):
     """按维度顺序收集各维度的图表 option，返回 [(维度标题, option), ...]。"""
     out = []
-    for _key, res in results.items():
-        if not (res.is_ok() and res.data):
+    for _key, res in (results or {}).items():
+        # res 可能为 None（维度缺失/上游未产出）、data 可能不是 dict：跳过而不是整页崩
+        if res is None or not res.is_ok() or not isinstance(res.data, dict):
             continue
         c = res.data.get("chart")
-        if not c:
-            continue
-        if c.get("type") == "candlestick" and "ohlc" in c:
+        if not isinstance(c, dict):
+            continue  # 无图表数据或图表规格非法（如 None / list）
+        t = c.get("type")
+        # dates 是各 option 的必需字段，缺了会在 _line_bar_option 里 KeyError
+        if t == "candlestick" and c.get("ohlc") and c.get("dates"):
             out.append((res.title, _candlestick_option(c)))
-        elif c.get("type") in ("line", "bar") and c.get("series"):
+        elif t in ("line", "bar") and c.get("series") and c.get("dates"):
             out.append((res.title, _line_bar_option(c)))
-        elif c.get("type") == "pie" and c.get("data"):
+        elif t == "pie" and c.get("data"):
             out.append((res.title, _pie_option(c)))
     return out
 
@@ -359,6 +482,7 @@ def _page_title(md: str) -> str:
 
 def _kpi_items(results):
     """从分析结果提取核心指标，供报告顶部 KPI 速览条（四类标的通用）。"""
+    results = results or {}  # results 可能为 None（上游未产出）
     items = []
     # 最新价/净值：优先 runner 显式字段（未复权），退化到图表序列
     for key in ("trend", "nav"):
@@ -381,27 +505,29 @@ def _kpi_items(results):
                 o = c["ohlc"][-1]
                 v = o[1] if isinstance(o, (list, tuple)) and len(o) > 1 else o
         if v is not None:
-            items.append(("最新价", f"{float(v):,.2f}"))
+            # 口径可能是 np.nan 或 'N/A' 这类字符串：_num_text 统一兜底，不再 float() 崩
+            items.append(("最新价", _num_text(v)))
         break
     # 区间涨幅 + 波动率
     for r in results.values():
-        if not (r.is_ok() and r.data):
+        if not (r and r.is_ok() and r.data):
             continue
         d = r.data
         if isinstance(d.get("returns"), dict) and "近20日涨幅%" in d["returns"]:
             rets = d["returns"]
-            items.append(("近20日", f"{rets.get('近20日涨幅%', 'N/A')}%"))
-            items.append(("近250日", f"{rets.get('近250日涨幅%', 'N/A')}%"))
+            # 缺键/非数值一律走占位文案，不再拼出 "N/A%"
+            items.append(("近20日", _num_text(rets.get("近20日涨幅%"), suffix="%")))
+            items.append(("近250日", _num_text(rets.get("近250日涨幅%"), suffix="%")))
             vol = d.get("volatility")
             if vol is not None:
-                items.append(("年化波动", f"{vol}%"))
+                items.append(("年化波动", _num_text(vol, suffix="%")))
             break
     # 估值分位
     val = results.get("valuation")
     if val and val.is_ok() and val.data:
         pe = val.data.get("pe_hist_percentile")
         if pe is not None:
-            items.append(("PE 5年分位", f"{pe}%"))
+            items.append(("PE 5年分位", _num_text(pe, digits=1, suffix="%")))
     return items
 
 
@@ -444,26 +570,64 @@ def _split_sections(md: str):
     return "\n".join(head), sections
 
 
+_CHART_PH = re.compile(r"^<!--\s*chart:\s*(.+?)\s*-->$")
+
+
+def _norm_dim(name) -> str:
+    """维度标识归一化：去掉章节编号与全部空白，用于「维度标题 ↔ 章节标题 ↔ 占位符名」互配。
+
+    占位符里写「股东 筹码」「5. 股东筹码」而维度标题是「股东筹码」时，
+    严格相等会判为不匹配，图表被挪走——归一化后仍能对上。
+    """
+    s = re.sub(r"^\d+\s*[.、)]\s*", "", str(name or "").strip())
+    return re.sub(r"\s+", "", s)
+
+
+def _channel_note_html() -> str:
+    """页脚的数据通道降级提示（如 SDK 不可用改走 HTTP）。
+
+    DataAPI 在 SDK 初始化失败时会自动降级为 HTTP，取数结果不变但通道已切换。
+    这里把降级原因写入报告，避免"以为走 SDK、实际走 HTTP"的排查盲区。
+    """
+    try:
+        from data_api import data_channel_note
+
+        note = data_channel_note()
+    except Exception:
+        return ""
+    if not note:
+        return ""
+    return f"<br><span style='color:#9aa0a8'>数据通道提示：{_html.escape(note)}</span>"
+
+
 def render_html_report(md_text: str, results) -> str:
     """markdown 报告 + 图表数据 → 完整 HTML 页面字符串。
 
-    图表按维度标题分发到对应 `## N. 标题` 章节内（标题后）；匹配不上的回退到附录。
+    图表按维度标题分发到对应 `## N. 标题` 章节内；正文可用 `<!--chart:维度名-->`
+    指定图表的插入位置（用于让图与相关小节相邻，如饼图紧跟前十大股东表）；
+    未使用占位符的维度仍回退到章节开头，匹配不上的回退到附录。
+    维度名按 `_norm_dim` 归一化后比较，占位符名对不上时该章节图表回退到章节开头、
+    其余回退到附录，并在原位置留 HTML 注释——保证图表不因命名不一致而丢失。
     """
     head_md, sections = _split_sections(md_text)
 
-    # 图表按维度归类，all_opts 保留全局编号（供 id/JS 映射）
+    # 图表按维度归一化标题归类，all_opts 保留全局编号（供 id/JS 映射）
     by_title = {}
     all_opts = []
     for title, opt in _chart_options(results):
         all_opts.append(opt)
-        by_title.setdefault(title, []).append(len(all_opts) - 1)
+        by_title.setdefault(_norm_dim(title), []).append(len(all_opts) - 1)
 
     def _chart_divs(section_title):
-        key = re.sub(r"^\d+\.\s*", "", section_title).strip()
-        return "".join(f'<div id="chart-{i}" class="chart"></div>' for i in by_title.pop(key, []))
+        return "".join(
+            f'<div id="chart-{i}" class="chart"></div>'
+            for i in by_title.pop(_norm_dim(section_title), []))
 
     parts = [md_to_html(head_md)] if head_md else []
-    kpi = _kpi_html(_kpi_items(results))
+    try:
+        kpi = _kpi_html(_kpi_items(results))
+    except Exception:
+        kpi = ""  # KPI 条是装饰性内容，任何意外都不该让整页渲染失败
     if kpi:
         parts.append(kpi)
     toc = []
@@ -484,10 +648,60 @@ def render_html_report(md_text: str, results) -> str:
             k += 1
         if lead:
             parts.append(md_to_html("\n".join(lead)))
-        parts.append(_chart_divs(heading))
-        rest = body[k:]
-        if any(line.strip() for line in rest):
-            parts.append(md_to_html("\n".join(rest)))
+
+        key = _norm_dim(heading)
+        # 正文占位符 `<!--chart:维度名-->`：就地插入该维度图表
+        body = body[k:]
+        placeholders = [i for i, ln in enumerate(body) if _CHART_PH.match(ln.strip())]
+        if placeholders:
+            chunks, prev = [], 0
+            for i in placeholders:
+                chunks.append(body[prev:i])
+                chunks.append(["__CHART__:" + _CHART_PH.match(body[i].strip()).group(1)])
+                prev = i + 1
+            chunks.append(body[prev:])
+            body = [ln for c in chunks for ln in c]
+
+            out, used = [], set()
+            for ln in body:
+                if ln.startswith("__CHART__:"):
+                    want = ln.split(":", 1)[1]
+                    wkey = _norm_dim(want)
+                    idxs = by_title.pop(wkey, [])
+                    if idxs:
+                        out.append("__RAW__" + "".join(
+                            f'<div id="chart-{i}" class="chart"></div>' for i in idxs))
+                    else:
+                        # 同一维度被多次引用（used 已有）或占位符名对不上：这里没有图可放，
+                        # 但不能静默——留 HTML 注释便于排查；该图仍会在下方
+                        # 章节开头（_chart_divs）或文末附录出现，不会丢失
+                        tag = "duplicate" if wkey in used else "unmatched"
+                        out.append(f"__RAW__<!-- chart-placeholder-{tag}: "
+                                   + want.replace("--", "-") + " -->")
+                    used.add(wkey)
+                else:
+                    out.append(ln)
+            # 逐段渲染，__RAW__ 段原样输出
+            seg, buf = [], []
+            for ln in out:
+                if ln.startswith("__RAW__"):
+                    if any(x.strip() for x in buf):
+                        seg.append(md_to_html("\n".join(buf)))
+                    buf = []
+                    seg.append(ln[len("__RAW__"):])
+                else:
+                    buf.append(ln)
+            if any(x.strip() for x in buf):
+                seg.append(md_to_html("\n".join(buf)))
+            # 本章节维度的图表若没被任何占位符消费（含占位符名写错的情况），
+            # 回退到章节开头，与「无占位符」路径保持一致，避免只剩附录兜底
+            parts.append(_chart_divs(heading))
+            parts.extend(seg)
+        else:
+            parts.append(_chart_divs(heading))
+            rest = body
+            if any(line.strip() for line in rest):
+                parts.append(md_to_html("\n".join(rest)))
 
     # 未匹配到章节的图表回退到附录
     leftover = [i for idxs in by_title.values() for i in idxs]
@@ -502,8 +716,10 @@ def render_html_report(md_text: str, results) -> str:
         return f"{m.group(1)}<span class='badge' style='background:{color}'>{m.group(2)}</span>{m.group(3)}"
     body_html = re.sub(r"(<strong>风险等级</strong>：)(高|中|低)(（\d+ 项信号）)", _badge, body_html)
 
-    chart_js = json.dumps(
-        {f"chart-{i}": all_opts[i] for i in range(len(all_opts))}, ensure_ascii=False
+    # 图表数据内联进 <script>：必须走 _json_script（转义 < 并兜底非 JSON 类型），
+    # 直接 json.dumps 会因标题里的 "</script>" 提前闭合脚本、或因 np.int64 抛 TypeError
+    chart_js = _json_script(
+        {f"chart-{i}": all_opts[i] for i in range(len(all_opts))}
     )
     toc_html = ""
     if toc:
@@ -516,7 +732,7 @@ def render_html_report(md_text: str, results) -> str:
         f"<style>{_CSS}</style></head><body>"
         + "<div class='layout'>" + toc_html + "<main class='content'>"
         + body_html
-        + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）</div>"
+        + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）{_channel_note_html()}</div>"
         + "</main></div>"
         + f"<script>const CHARTS = {chart_js};{_INIT_JS}</script>"
         + "</body></html>"
@@ -531,6 +747,11 @@ if __name__ == "__main__":
         "## 1. 行情趋势\n"
         "近20日涨幅 **5.2%**，年化波动 `12.3%`。\n\n"
         "| 指标 | 数值 |\n|---|---|\n| 近20日涨幅 | 5.2% |\n| 年化波动 | 12.3% |\n\n"
+        "| 口径 | 数值 |\n|---|---|\n| 近20日主力净流入(亿) | -21.47 |\n| 北向近20日净流入(百万) | N/A |\n\n"
+        "| 指标 | 数值 |\n|---|---|\n| 融资余额(亿) | 173.19 |\n| 近5日融资余额变化% | 0.48 |\n| 两融标的 | 是 |\n\n"
+        "| 项目 | 内容 |\n|---|---|\n| 股票简称 | 测试标的 |\n| 员工数 | 34,992 |\n| 注册资本 | 12.50亿 |\n\n"
+        "| 除权除息日 | 每股分红(税前,元) |\n|---|---|\n| 20240619 | 30.88 |\n| 20241220 | 23.88 |\n\n"
+        "| 区间 | 标的 | 000300.SH |\n|---|---|---|\n| 近20日涨幅% | 5.2% | -6.05 |\n| 年化波动率% | 12.3% | 13.15 |\n\n"
         "- 风险信号 1\n- 风险信号 2\n\n"
         "---\n"
         "*本报告由AI自动生成*"
@@ -551,7 +772,23 @@ if __name__ == "__main__":
     )
     page = render_html_report(md, {"trend": fake})
     assert "<h1>测试标的 全景研究报告</h1>" in page
-    assert "<table>" in page and "5.2%" in page
+    assert "<table class='col-2'>" in page and "5.2%" in page
+    # 无中文的数值列（资金面表：数值 + N/A）：整列右对齐，缺失值不破坏判定
+    _mf = page[page.index("-21.47") - 200:]
+    assert "<td class='r'>-21.47</td>" in _mf
+    assert "<td class='r'>N/A</td>" in _mf
+    # 含中文的混合列（两融表：数值 + 「是」）：整列统一左对齐，不得逐单元格切换
+    _mg = page[page.index("173.19") - 200:]
+    assert "<td>173.19</td>" in _mg and "<td class='r'>173.19</td>" not in _mg
+    assert "<td>是</td>" in _mg and "<td class='r'>是</td>" not in _mg
+    # 日期列（除权除息日 20240619）形似数字但属文本，须左对齐
+    assert "<td>20240619</td>" in page and "<td class='r'>20240619</td>" not in page
+    assert "<td class='r'>30.88</td>" in page
+    # 文本列（概况表）：形如数字的值也不得单独右对齐
+    _i = page.index("<td>34,992</td>") if "<td>34,992</td>" in page else -1
+    assert _i > 0, "概况表文本列应整体左对齐，员工数不得右对齐"
+    assert "<td class='r'>34,992</td>" not in page
+    assert "<td class='r'>12.50亿</td>" not in page
     assert "<ul><li>风险信号 1</li>" in page
     assert "<blockquote>数据日期" in page
     assert "echarts@5/dist/echarts.min.js" in page
@@ -561,6 +798,27 @@ if __name__ == "__main__":
     assert '<span class="num">1</span>行情趋势' in page
     assert "报告生成于" in page
     assert page.index('<div id="chart-0"') > page.index('<span class="num">1</span>行情趋势')
+
+    # 占位符 `<!--chart:维度名-->`：图表就地插入到该小节，而非章节开头
+    md_ph = (
+        "# 占位符测试\n\n## 1. 股东筹码\n"
+        "**前十大股东**：合计持股 67.62%\n\n<!--chart:股东筹码-->\n\n"
+        "| 股东名称 | 持股比例% |\n|---|---|\n| 甲公司 | 54.50 |\n\n"
+        "**股东户数**：296,404\n"
+    )
+    fake_ph = DimensionResult.success(
+        "股东筹码",
+        data={"chart": {"title": "持股分布", "type": "pie",
+                        "data": [{"name": "甲公司", "value": 54.5}]}},
+    )
+    page_ph = render_html_report(md_ph, {"shareholder": fake_ph})
+    _head = page_ph.index("**前十大股东**") if "**前十大股东**" in page_ph else page_ph.index("前十大股东")
+    _chart = page_ph.index('<div id="chart-0"')
+    _holders = page_ph.index("296,404")
+    assert _head < _chart < _holders, "占位符图表应紧随前十大股东、且在股东户数之前"
+    assert "<!--chart:" not in page_ph  # 占位符本身不应出现在输出中
+    assert "附录" not in page_ph  # 已被占位符消费，不应重复落到附录
+
     with open("_selfcheck_report.html", "w", encoding="utf-8") as f:
         f.write(page)
     print("self-check OK -> _selfcheck_report.html")

@@ -4,18 +4,20 @@
 统一结果模型：为分析 skill 提供一致的状态、结构和错误处理。
 
 核心设计：
-- ResultStatus：四态枚举（success / empty / permission_denied / insufficient_history）
+- ResultStatus：五态枚举（success / empty / permission_denied / insufficient_history / error）
 - DimensionResult：每个分析维度的标准输出容器
-- safe_result：装饰器，把函数异常自动映射为 DimensionResult
+- safe_result：装饰器，把函数异常自动映射为 DimensionResult（error 态，异常类型与消息写入 note）
 """
 
+import functools
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 
 class ResultStatus(str, Enum):
-    """维度执行后的四态之一。"""
+    """维度执行后的五态之一。"""
 
     SUCCESS = "success"
     EMPTY = "empty"                     # 接口返回空
@@ -94,16 +96,23 @@ class DimensionResult:
 def safe_result(title: str):
     """装饰器：捕获异常并转为 DimensionResult.error。
 
+    异常信息不留白：类型与消息写入 DimensionResult.note（报告的风险提示/备注节会呈现），
+    同时打到 stderr，避免真实 bug 被当成"维度不可用"静默吞掉。
+
     用法：
         @safe_result("行情趋势")
         def analyze_trend(...) -> DimensionResult:
             ...
     """
     def decorator(fn: Callable[..., DimensionResult]) -> Callable[..., DimensionResult]:
+        @functools.wraps(fn)  # 保留 __name__/__doc__，否则被装饰方法全变成 "wrapper"
         def wrapper(*args, **kwargs) -> DimensionResult:
             try:
                 return fn(*args, **kwargs)
             except Exception as e:
-                return DimensionResult.error(title, note=f"{type(e).__name__}: {e}")
+                note = f"{type(e).__name__}: {e}"
+                print(f"[result_model] 维度「{title}」执行异常（{getattr(fn, '__name__', '?')}）: {note}",
+                      file=sys.stderr)
+                return DimensionResult.error(title, note=note)
         return wrapper
     return decorator

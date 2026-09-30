@@ -45,3 +45,6 @@ venv/
 # Claude Code worktrees
 .claude/
 sxsc-tushare-analysis/scripts/_selfcheck_report.html
+
+# 报告产物（SKILL 要求写入项目目录，作为输出不入库）
+*_report.html

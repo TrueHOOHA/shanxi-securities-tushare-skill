@@ -202,16 +202,17 @@ def calc_factor_positioning(pe_hist_pct=None, fscore=None, return_250d=None):
     strong_mom = dims.get("动量") == "强"
     weak_mom = dims.get("动量") == "弱"
 
+    # 合规：仅陈述因子组合的客观状态，不含优劣评判、机会判断或操作指向
     if cheap and quality and strong_mom:
-        label = "价值修复+动量启动（最佳象限）"
+        label = "低估值+高质量+动量为强"
     elif cheap and quality and not strong_mom:
-        label = "低估值高质量但动量未启动（左侧布局）"
+        label = "低估值+高质量，动量非强"
     elif cheap and not quality:
-        label = "低估值但质量偏弱（价值陷阱风险）"
+        label = "低估值，质量非优"
     elif not cheap and quality and strong_mom:
-        label = "高质量+强动量但估值不便宜（趋势跟随）"
+        label = "高质量+动量为强，估值非低"
     elif not cheap and not quality and weak_mom:
-        label = "高估值+低质量+弱动量（最差象限，回避）"
+        label = "估值非低+质量非优+动量为弱"
     else:
         label = "因子信号混合，需逐维细看"
 
@@ -329,45 +330,66 @@ def calc_risk_budget(var95=None, max_drawdown=None, beta=None, amihud=None, vola
       - 流动性差 → 风险越高（Amihud>0.1→参考值降一档）
       - Beta 高 → 风险越高（>1.2→参考值降一档）
     返回 dict：风险承受度参考值 + 风险等级 + 各维风险信号 + 理由。
+    ⚠️ 全部输入均为 None 时不编造默认仓位：返回 None 风险等级（调用方以
+    `if budget.get("risk_level")` 判定是否展示，None 即不展示）。
+    reasons 始终保留"某维无数据"的说明，便于区分"数据不足"与"风险中性"。
     """
-    base = 60  # 默认参考值
+    base = None  # 无任何有效输入时为 None，不预置 60 这类无依据的默认值
     reasons = []
 
     if max_drawdown is not None:
         mdd = float(max_drawdown)
         if mdd < -40:
-            base = min(base, 20); reasons.append(f"最大回撤 {mdd}%（极深）")
+            base = 20; reasons.append(f"最大回撤 {mdd}%（极深）")
         elif mdd < -25:
-            base = min(base, 40); reasons.append(f"最大回撤 {mdd}%（较深）")
+            base = 40; reasons.append(f"最大回撤 {mdd}%（较深）")
         else:
-            reasons.append(f"最大回撤 {mdd}%（可控）")
+            base = 60; reasons.append(f"最大回撤 {mdd}%（可控）")
+    else:
+        reasons.append("最大回撤 无数据")
 
     if volatility is not None:
         vol = float(volatility)
         if vol > 40:
-            base = min(base, base - 10); reasons.append(f"年化波动 {vol}%（偏高）")
+            base = (base if base is not None else 60) - 10; reasons.append(f"年化波动 {vol}%（偏高）")
         else:
             reasons.append(f"年化波动 {vol}%（适中）")
+    else:
+        reasons.append("年化波动 无数据")
 
     if amihud is not None:
         ai = float(amihud)
         _ai_txt = f"{ai:.6f}".rstrip("0").rstrip(".")
         if ai > 0.1:
-            base = min(base, base - 10); reasons.append(f"Amihud {_ai_txt}（流动性差，进出成本高）")
+            base = (base if base is not None else 60) - 10; reasons.append(f"Amihud {_ai_txt}（流动性差，进出成本高）")
         else:
             reasons.append(f"Amihud {_ai_txt}（流动性好）")
+    else:
+        reasons.append("Amihud 无数据")
 
     if beta is not None:
         b = float(beta)
         if b > 1.2:
-            base = min(base, base - 10); reasons.append(f"Beta {b}（高弹性，放大波动）")
+            base = (base if base is not None else 60) - 10; reasons.append(f"Beta {b}（高弹性，放大波动）")
         elif b < 0.8:
             reasons.append(f"Beta {b}（防御型，波动小于大盘）")
         else:
             reasons.append(f"Beta {b}（接近大盘）")
+    else:
+        reasons.append("Beta 无数据")
 
     if var95 is not None:
         reasons.append(f"VaR95 {var95}（单日最大亏损预期）")
+    else:
+        reasons.append("VaR95 无数据")
+
+    if base is None:
+        # 无任何有效风险输入：不给具体仓位、不给风险等级（"低"是没有依据的结论）
+        return {
+            "suggested_position_pct": None,
+            "risk_level": None,
+            "reasons": reasons + ["各维风险因子均无数据，不给出风险承受度参考值"],
+        }
 
     base = max(base, 10)  # 最低 10%
     level = "高" if base <= 20 else ("中" if base <= 40 else "低")

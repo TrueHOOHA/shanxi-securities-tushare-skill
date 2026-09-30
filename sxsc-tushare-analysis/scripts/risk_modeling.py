@@ -33,7 +33,8 @@ def calc_var_cvar(returns, confidence=(0.95, 0.99)):
 
 def calc_tail_risk(returns):
     """尾部风险分析：偏度、峰度、极端值。
-    偏度 < 0 = 左偏（亏损侧尾部更长，风险更大）；峰度 > 0（超额）= 厚尾。
+    偏度 < 0 = 左偏（亏损侧尾部更长，风险更大）；峰度 > 0（超额峰度，正态=0）= 厚尾。
+    判定口径统一：本函数所有"厚尾/薄尾"判断均以超额峰度是否 > 0 为准（不用 > 3 的第二套阈值）。
     """
     ret = np.asarray(returns.dropna(), dtype=float)
     if len(ret) < 10:
@@ -44,14 +45,14 @@ def calc_tail_risk(returns):
         return None
     n = len(ret)
     skew = round(float(np.mean(((ret - mean) / std) ** 3) * np.sqrt(n * (n - 1)) / (n - 2)), 2) if n > 2 else 0
-    kurt = round(float(np.mean(((ret - mean) / std) ** 4)) - 3, 2)
+    kurt = round(float(np.mean(((ret - mean) / std) ** 4)) - 3, 2)  # 已减 3，为超额峰度
     return {
         "偏度": skew,
         "峰度(超额)": kurt,
         "interpretation": f"{'左偏' if skew < 0 else '右偏'}，{'厚尾' if kurt > 0 else '薄尾'}（正态=0）",
         "risk": (
             "尾部风险高（左偏厚尾，极端亏损风险大）" if (skew < -0.5 and kurt > 0)
-            else "右偏厚尾（极端波动大，上行尾部更厚）" if (skew > 0.5 and kurt > 3)
+            else "右偏厚尾（极端波动大，上行尾部更厚）" if (skew > 0.5 and kurt > 0)
             else "尾部风险适中"
         ),
     }
@@ -95,9 +96,13 @@ def calc_amihud_illiquidity(price_returns, dollar_volume):
     df = pd.DataFrame({"ret": np.abs(price_returns), "vol": dollar_volume}).dropna()
     if len(df) == 0:
         return None
-    vol = df["vol"].copy()
-    vol[vol == 0] = 1e-10
-    illiq = df["ret"] / (vol / 1e6)
+    # 剔除零/负成交额（停牌、无成交）行，不能把 vol=0 替换成 1e-10 再作除数：
+    # 那会把单日非流动性放大到 1e10 量级、把区间均值抬高十几个数量级，
+    # 解读从"流动性好"直接翻转成"流动性差"。Amihud 衡量的是"有成交日的价格冲击"。
+    df = df[df["vol"] > 0]
+    if len(df) == 0:
+        return None
+    illiq = df["ret"] / (df["vol"] / 1e6)
     mean_illiq = round(float(illiq.mean()), 6)
     return {
         "Amihud非流动性": mean_illiq,
@@ -119,7 +124,9 @@ def calc_rolling_beta(stock_returns, market_returns, window=60):
     for i in range(window, len(aligned) + 1):
         s = stock[i - window:i]
         m = market[i - window:i]
-        v = np.var(m)
+        # ddof=1：与 OLS/attribution.calc_beta_alpha 口径一致，
+        # np.var 默认 ddof=0 会把 Beta 系统性放大 n/(n-1)（n=60 时约 1.7%）
+        v = np.var(m, ddof=1)
         if v > 0:
             betas.append(np.cov(s, m)[0, 1] / v)
     if len(betas) == 0:
