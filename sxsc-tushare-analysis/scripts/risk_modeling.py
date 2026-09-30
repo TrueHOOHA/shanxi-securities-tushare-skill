@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-风险建模模块：VaR/CVaR、尾部风险（偏度/峰度）、回撤深度分析、Amihud 非流动性、
+风险建模模块：VaR/CVaR、尾部风险（偏度/峰度）、Amihud 非流动性、
 滚动 Beta、滚动夏普、相对强度（RS）。
 
-用于风险维度的立体度量：尾部风险 + 流动性风险 + 回撤体感 + 动态监控。
+用于风险维度的立体度量：尾部风险 + 流动性风险 + 动态监控。
 """
 
 import numpy as np
@@ -55,35 +55,6 @@ def calc_tail_risk(returns):
             else "右偏厚尾（极端波动大，上行尾部更厚）" if (skew > 0.5 and kurt > 0)
             else "尾部风险适中"
         ),
-    }
-
-
-def calc_drawdown_detail(df_nav):
-    """回撤深度分析：最大回撤、回撤持续期、痛苦指数。
-    痛苦指数 = 回撤深度的平均值（衡量持续处于水下状态的程度）。
-    """
-    cummax = df_nav.cummax()
-    dd = (df_nav / cummax - 1) * 100
-    max_dd = round(float(dd.min()), 2)
-
-    underwater = dd < 0
-    durations = []
-    start = None
-    for i, u in enumerate(underwater):
-        if u and start is None:
-            start = i
-        elif not u and start is not None:
-            durations.append(i - start)
-            start = None
-    if start is not None:
-        durations.append(len(underwater) - start)
-    max_duration = max(durations) if durations else 0
-    pain_index = round(float(np.abs(dd[underwater]).mean()), 2) if underwater.any() else 0
-
-    return {
-        "最大回撤%": max_dd,
-        "最长回撤持续期(交易日)": max_duration,
-        "痛苦指数": pain_index,
     }
 
 

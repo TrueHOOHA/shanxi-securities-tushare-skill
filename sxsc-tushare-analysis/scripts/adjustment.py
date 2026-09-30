@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-调整与归一化模块：复权处理、序列归一化、收益率对比、历史分位数、Z-Score 标准化。
+调整与归一化模块：复权处理、序列归一化、收益率对比、历史分位数、截面去极值。
 
 用于纵向对比（复权消除除权跳变）和横向对比（多标的归一化）。
 """
@@ -146,56 +146,9 @@ def calc_percentile_rank(value, historical_series):
     return round(rank, 1)
 
 
-# ============ Z-Score 标准化 ============
-def calc_zscore(values, benchmark_series=None):
-    """Z-Score 标准化：将指标转换为与均值的标准差倍数。
-    values: 当前值或值序列；benchmark_series: 参照群体（如同行业所有股票的 PE）。
-    Z > 1.96 = 显著偏高（5%显著性水平）；Z < -1.96 = 显著偏低。
-    """
-    if benchmark_series is None:
-        return None
-    arr = np.asarray(benchmark_series, dtype=float)
-    if len(arr) == 0:
-        return None
-    mean = arr.mean()
-    std = arr.std()
-    if std == 0:
-        return None
-    z = (np.mean(values) - mean) / std if hasattr(values, '__len__') else (values - mean) / std
-    z = round(float(z), 2)
-    flag = "显著偏高" if z > 1.96 else ("显著偏低" if z < -1.96 else "正常范围")
-    return {"Z-Score": z, "interpretation": flag}
-
-
-# ============ 因子加工借鉴：清洗 / 去极值 / 截面分位 ============
-# 说明：分析 skill 非"全市场因子流水线"，仅借鉴其中对分析有用的三步：
-#   ① clean_panel        —— 统一清洗带日期的面板（财务三表/估值面板）
-#   ② winsorize_cross_section —— 截面去极值，仅用于截面均值/标准化前
-#   ③ valuation_percentiles    —— 估值双口径分位（历史分位 + 同业截面分位）
-# 注意：② 严禁用于 VaR/CVaR、偏度/峰度、最大回撤等刻画尾部的指标。
-
-
-def clean_panel(df, date_col="end_date", value_cols=None, dedup=True, sort_asc=True):
-    """统一清洗带日期的面板数据（财务三表/估值面板等）。
-    - 去重：同 date_col 保留最新公告（ann_date 最大）的行
-    - 排序：按 date_col 升序
-    - 数值列：value_cols 强制转 numeric（非数→NaN），便于后续计算
-    返回清洗后的 DataFrame（原始 df 不被修改）。
-    """
-    if df is None or len(df) == 0:
-        return df
-    out = df.copy()
-    if dedup and date_col in out.columns:
-        keys = [date_col] + (["ann_date"] if "ann_date" in out.columns else [])
-        out = out.sort_values(keys).drop_duplicates(date_col, keep="last")
-    if sort_asc and date_col in out.columns:
-        out = out.sort_values(date_col).reset_index(drop=True)
-    cols = value_cols if value_cols is not None else [c for c in out.columns if c not in (date_col, "ann_date", "ts_code")]
-    for c in cols:
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce")
-    return out
-
+# ============ 截面去极值（分析借用） ============
+# 仅用于截面均值/标准化前，避免单只异常股拉偏行业均值或 Z-Score；
+# 【禁止】用于 VaR/CVaR、偏度/峰度、最大回撤等刻画尾部的指标——会抹掉真实尾部信息。
 
 def winsorize_cross_section(series, method="mad", k=3.0):
     """截面去极值：对一组截面值（如某日行业成分股 PE）做 3σ-MAD 或 1/99 百分位截断。
@@ -215,22 +168,3 @@ def winsorize_cross_section(series, method="mad", k=3.0):
     else:
         lower, upper = s.quantile(0.01), s.quantile(0.99)
     return s.clip(lower, upper)
-
-
-def valuation_percentiles(value, historical_series, cross_section_series, min_sample=10):
-    """估值双口径分位：历史分位 + 同业截面分位（值高于参考集多少比例，0-100）。
-    - historical_series：该标的自身近 N 年该指标序列（时序分位，calc_percentile_rank）
-    - cross_section_series：当日同行业/同类标的该指标截面（截面分位）
-    双口径交叉判断：双双偏高=贵、双双偏低=便宜、背离=相对自身历史与相对同业不一致（需找原因）。
-    方向由调用方按指标语义解读（PE 高=偏贵；ROE 高=偏优），函数只返回中性分位数。
-    截面样本 < min_sample 时标注"样本不足"，分位仅供参考（避免 5-6 只同业的 20% 步长噪声）。
-    """
-    cs = pd.Series(cross_section_series).dropna()
-    hist = pd.Series(historical_series).dropna() if historical_series is not None else pd.Series([], dtype=float)
-    cs_rank = calc_percentile_rank(value, cs) if len(cs) > 0 else None
-    return {
-        "历史分位": calc_percentile_rank(value, hist) if len(hist) > 0 else None,
-        "截面分位": cs_rank,
-        "截面样本数": int(len(cs)),
-        "截面可靠性": "样本不足(仅供参考)" if len(cs) < min_sample else "可用",
-    }

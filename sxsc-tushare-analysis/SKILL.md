@@ -84,7 +84,7 @@ description: >
 |---|------|---------|------------|
 | 1 | 概况 | `stock_basic`、`stock_company`、`fina_mainbz`、`namechange`、`new_share` | 公司全称、行业（申万）、上市日期、注册地、员工数、主营业务简介；**主营业务构成**（最新报告期按产品收入前三及占比）、曾用名、次新股标记（近1年IPO附发行价/PE） |
 | 2 | 行情趋势 | `daily`、`daily_basic`、**`adj_factor`**、`index_daily`(沪深300+行业指数)；周线/月线由日线重采样（不单独取 `weekly`/`monthly`） | 近 20/60/250 日涨跌幅（基于复权价）、MA5/MA20/MA60、**MACD/RSI/KDJ/布林带**、换手率、振幅、波动率、阶段最高/最低；**基准对比**：对沪深300及所属行业指数计算相同口径的涨跌幅、年化波动率、最大回撤、夏普比率，与标的并列对比（判断超额收益与相对风险） |
-| 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业)、`index_member`(行业成分股)、`dividend`(近3年实施分红) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值、近3年分红次数与累计每股分红（cash_div_tax 为每股税前口径）；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_member` 取成分股 → 各取 `daily_basic` PE/PB，先 `winsorize_cross_section` 截面去极值再求均值/中位数，避免单只异常股拉偏）；**PE/PB 双口径分位**（`valuation_percentiles`：近 5 年历史分位 + 当日同行业截面分位，双口径背离时需找原因） |
+| 3 | 估值分析 | `daily_basic`、`index_dailybasic`(行业)、`index_member`(行业成分股)、`dividend`(近3年实施分红) | PE(TTM)、PB、PS(TTM)、股息率、总市值、流通市值、近3年分红次数与累计每股分红（cash_div_tax 为每股税前口径）；**与行业均值对比**（取 `index_classify` 获取行业指数代码 → `index_member` 取成分股 → 各取 `daily_basic` PE/PB，先 `winsorize_cross_section` 截面去极值再求均值/中位数，避免单只异常股拉偏）；**PE/PB 双口径分位**（近 5 年历史分位 + 当日同行业截面分位，双口径背离时需找原因；历史分位用 `calc_percentile_rank`，截面均值前用 `winsorize_cross_section` 去极值） |
 | 4 | 财务质量 | `fina_indicator`、`income`、`balancesheet`、`cashflow`、**`forecast`**、`express`(业绩快报)、`fina_audit`(审计意见)、`disclosure_date`(披露计划) | ROE、毛利率、净利率、营收/利润增速（YoY）、资产负债率、经营现金流；业绩预告类型及变动幅度；**Piotroski F-Score（9 项量化打分，≥7 强/≤2 弱）**；业绩快报（早于定期报告的营收/净利同比）；审计意见（非标准无保留→风险信号）；下一期财报预定披露日（事件窗口） |
 | 5 | 资金面 | `moneyflow`、`moneyflow_hsgt`、**`block_trade`**、`hsgt_top10`(北向十大成交)、`repurchase`(回购)、`broker_recommend`(券商金股) | 近 5-20 日主力净流入（注意：`net_mf_amount` 为全口径净流入，`buy_elg_amount - sell_elg_amount` 为超大单口径，两者方向可能相反，需按分析目标选择口径）、北向持股变化、大宗交易折溢价/机构买卖方向；沪深股通十大成交股上榜次数与净买入（`net_amount` 单位：元）、近一年回购金额（**元**，累计快照取最新已实施值，勿求和；`proc` 为预案/股东大会通过的不计）、近3个月券商金股入选（month 必选按月查询后本地过滤） |
 | 6 | 股东/筹码 | `top10_holders`、`top10_floatholders`、`stk_holdernumber`、**`stk_holdertrade`**、`pledge_stat`/`pledge_detail`(股权质押)、`stk_managers`/`stk_rewards`(管理层) | 前十大股东/流通股东集中度、**股东户数时间序列分析（筹码集中度指标）**、大股东增减持方向与比例；股权质押比例（>30% 为偏高风险信号）；高管披露记录（`stk_managers` 实际不返回 end_date、含历史记录，现任规模以 `stk_rewards` 最新报告期披露人数为准）与薪酬持股 |
@@ -258,7 +258,7 @@ description: >
 
 - **序列归一化（rebase）**：将各标的复权价格序列统一缩放到基准日 = 100，公式：`归一化净值 = 当日复权价 / 基准日复权价 × 100`。基准日取对比区间起点，使得所有标的从同一起跑线出发。
 - **收益率对比**：计算各标的同期收益率（近 1 月/3 月/6 月/1 年/YTD），放同一张表横向排序。
-- **估值分位数对比**：不同标的 PE/PB 不可直接比绝对值（行业属性不同），应转换为各自近 5 年历史分位数，再横排对比。跨标的截面均值/分位计算前，对截面值先 `winsorize_cross_section` 去极值（MAD 3σ）或直接取截面中位数，避免单只异常股拉偏；估值优先给"历史分位 + 同业截面分位"双口径（`valuation_percentiles`）。
+- **估值分位数对比**：不同标的 PE/PB 不可直接比绝对值（行业属性不同），应转换为各自近 5 年历史分位数，再横排对比。跨标的截面均值/分位计算前，对截面值先 `winsorize_cross_section` 去极值（MAD 3σ）或直接取截面中位数，避免单只异常股拉偏；估值优先给"历史分位 + 同业截面分位"双口径。
 - **财务指标对比**：ROE、毛利率等已是比率指标，可直接横排；营收/利润等绝对值指标应转换为增速（YoY/QoQ）或人均值后再对比。
 - **波动率/回撤对比**：年化波动率、最大回撤本身量纲统一，可直接横排；但夏普比率等需确认无风险利率口径一致。
 
@@ -334,7 +334,7 @@ description: >
   - 日期推算用 `data_api.shift_date(end_date, -n_days)` 回溯交易日。
 - 分析计算参考 `sxsc-tushare-analysis/scripts/` 下按方法分模块的参考模板：
   - `basic_metrics.py` — 收益率/MA/波动率/回撤/夏普/Sortino/IR/财务趋势/风险信号
-  - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/Z-Score/`clean_panel`(清洗)/`winsorize_cross_section`(截面去极值)/`valuation_percentiles`(双口径分位)
+  - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/`winsorize_cross_section`(截面去极值)
   - `technical_indicators.py` — MACD/RSI/KDJ/布林带/OBV/量比
   - `risk_modeling.py` — VaR/CVaR/尾部风险/回撤深度/Amihud/滚动Beta/滚动夏普/RS
   - `attribution.py` — CAPM Beta-Alpha/Piotroski F-Score/事件研究法

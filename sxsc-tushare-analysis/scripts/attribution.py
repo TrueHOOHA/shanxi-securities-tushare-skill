@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-归因分析模块：CAPM Beta/Alpha、Piotroski F-Score、事件研究法（CAR）。
+归因分析模块：CAPM Beta/Alpha、Piotroski F-Score。
 
-用于收益归因分解、财务健康量化评分、事件冲击因果分析。
+用于收益归因分解与财务健康量化评分。
 """
 
 import numpy as np
@@ -208,38 +208,3 @@ def calc_piotroski_fscore(df_fina, df_income, df_cashflow, df_balances=None):
     if comp_note:
         out["comp_note"] = comp_note
     return out
-
-
-# ============ 事件研究 ============
-def calc_event_study(stock_returns, market_returns, event_date, window_before=30, window_after=10):
-    """事件研究法：计算事件前后的异常收益（AR）与累计异常收益（CAR）。
-    event_date: 事件日在 returns 序列中的位置索引。
-    估计窗口 = 事件前 window_before 天，用于估算正常收益（市场模型回归）。
-    事件窗口 = 事件后 window_after 天，计算 AR = 实际收益 - 正常收益。
-    """
-    aligned = pd.DataFrame({"stock": stock_returns, "market": market_returns}).dropna()
-    est = aligned.iloc[event_date - window_before:event_date]
-    evt = aligned.iloc[event_date:event_date + window_after]
-    if len(est) < 10 or len(evt) == 0:
-        return None
-
-    s = np.asarray(est["stock"], dtype=float)
-    m = np.asarray(est["market"], dtype=float)
-    v = np.var(m, ddof=1)  # ddof=1 与 OLS/calc_beta_alpha 口径一致
-    if v == 0:
-        return None
-    beta = np.cov(s, m)[0, 1] / v
-    alpha = s.mean() - beta * m.mean()
-
-    evt_m = np.asarray(evt["market"], dtype=float)
-    evt_s = np.asarray(evt["stock"], dtype=float)
-    normal_returns = alpha + beta * evt_m
-    ar = evt_s - normal_returns
-    car = round(float(ar.sum()) * 100, 2)
-
-    return {
-        "CAR(累计异常收益%)": car,
-        "事件窗口AR均值%": round(float(ar.mean()) * 100, 2),
-        "Beta(估计窗口)": round(beta, 2),
-        "interpretation": f"事件 CAR {'偏正(>2%)' if car > 2 else ('偏负(<-2%)' if car < -2 else '影响不明显')}（阈值判断，未做 t 检验/置信区间）",
-    }

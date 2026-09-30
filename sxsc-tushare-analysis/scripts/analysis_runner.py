@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from adjustment import apply_adj_factor, calc_percentile_rank, valuation_percentiles, winsorize_cross_section
+from adjustment import apply_adj_factor, calc_percentile_rank, winsorize_cross_section
 from attribution import calc_beta_alpha, calc_piotroski_fscore
 from basic_metrics import (
     calc_cagr, calc_information_ratio, calc_ma, calc_max_drawdown,
