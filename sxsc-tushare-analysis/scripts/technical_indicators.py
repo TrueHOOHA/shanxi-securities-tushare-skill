@@ -7,6 +7,7 @@
 """
 
 import numpy as np
+import pandas as pd
 
 
 def calc_macd(df_close, fast=12, slow=26, signal=9):
@@ -54,17 +55,30 @@ def calc_rsi(df_close, period=14):
 
 
 def calc_kdj(df_high, df_low, df_close, period=9):
-    """KDJ 随机指标。返回 K/D/J 最新值。"""
+    """KDJ 随机指标。返回 K/D/J 最新值。
+
+    按国内惯例 K、D 以 50 起算：K_t = (2*K_{t-1} + RSV_t)/3，D_t = (2*D_{t-1} + K_t)/3；
+    旧实现用 ewm(adjust=False) 从首个 RSV 起算，等价于初值=首值而非 50，
+    与通达信/同花顺的 KDJ 数值不一致（短序列差异明显）。
+    RSV 为 NaN（除零等）时沿用前值，不产生 NaN 传播。
+    """
     if len(df_close) < period:
         return {"K": "N/A", "D": "N/A", "J": "N/A", "signal": "数据不足"}
     low_min = df_low.rolling(period).min()
     high_max = df_high.rolling(period).max()
     denom = high_max - low_min
-    rsv = (df_close - low_min) / denom * 100
-    k = rsv.ewm(alpha=1 / 3, adjust=False).mean()
-    d = k.ewm(alpha=1 / 3, adjust=False).mean()
+    rsv = ((df_close - low_min) / denom * 100).replace([np.inf, -np.inf], np.nan)
+    k = pd.Series(np.nan, index=rsv.index, dtype=float)
+    d = pd.Series(np.nan, index=rsv.index, dtype=float)
+    _kv, _dv = 50.0, 50.0  # 国内惯例：K/D 初值 50
+    for i, rv in enumerate(rsv.tolist()):
+        if pd.notna(rv):
+            _kv = (2 * _kv + rv) / 3
+            _dv = (2 * _dv + _kv) / 3
+        k.iloc[i] = _kv
+        d.iloc[i] = _dv
     j = 3 * k - 2 * d
-    if np.isnan(k.iloc[-1]) or np.isnan(d.iloc[-1]):
+    if pd.isna(k.iloc[-1]) or pd.isna(d.iloc[-1]):
         return {"K": "N/A", "D": "N/A", "J": "N/A", "signal": "数据不足"}
     return {
         "K": round(float(k.iloc[-1]), 2),

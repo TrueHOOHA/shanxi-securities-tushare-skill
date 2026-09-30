@@ -301,18 +301,28 @@ class FutAnalysisRunner:
     # ---------- 维度：仓单库存 ----------
     @safe_result("仓单库存")
     def analyze_wsr(self) -> DimensionResult:
-        # 从 T-1 起算，避免循环首日 d=今天被裁剪后标签与数据日期不一致
+        # ⚠️ 改用区间取数（get_fut_wsr_range，实测可用）：原实现按自然日每 7 天
+        # 单日调用 13 次，非交易日返回空被静默丢弃，"近 N 期"的 N 随样本浮动。
+        # 区间一次取数后按交易日采样，N 稳定且数据完整。
         end_d = datetime.strptime(min(self.end_date, self.api._t_minus_1), "%Y%m%d")
+        start_d = (end_d - timedelta(days=90)).strftime("%Y%m%d")
+        w = self.api.get_fut_wsr_range(self.symbol, start_d, end_d.strftime("%Y%m%d"))
         rows = []
-        for i in range(0, 90, 7):
-            d = (end_d - timedelta(days=i)).strftime("%Y%m%d")
-            w = self.api.get_fut_wsr(d)
-            if w is not None and not w.empty and "symbol" in w.columns:
-                sr = w[w["symbol"] == self.symbol]
-                if not sr.empty and "vol" in sr.columns:
-                    # ⚠️ 单位随品种变化（仓单日报有 unit 字段，如锌=吨），不能一律写"张"
-                    _unit = str(sr.iloc[0].get("unit")) if "unit" in sr.columns else None
-                    rows.append({"trade_date": d, "覆盖仓库数": int(len(sr)), "vol": int(sr["vol"].sum()), "unit": _unit})
+        if w is not None and not w.empty and {"trade_date", "vol"}.issubset(w.columns):
+            # 保险：服务端可能忽略 symbol 参数，本地再按产品代码过滤
+            if "symbol" in w.columns:
+                w = w[w["symbol"].astype(str) == self.symbol]
+            if w.empty:
+                return DimensionResult.empty("仓单库存", note=f"无 {self.symbol} 仓单数据")
+            daily = w.groupby("trade_date", sort=False)["vol"].sum().reset_index()
+            daily = daily.sort_values("trade_date")
+            # 交易日采样（约每 5 个交易日一条，保持"近 N 期"的均匀性）
+            daily = daily.iloc[::5]
+            for _, r in daily.iterrows():
+                _sub = w[w["trade_date"] == r["trade_date"]]
+                _unit = str(_sub.iloc[0].get("unit")) if "unit" in _sub.columns else None
+                rows.append({"trade_date": r["trade_date"], "覆盖仓库数": int(_sub["warehouse"].nunique()) if "warehouse" in _sub.columns else len(_sub),
+                             "vol": int(r["vol"]), "unit": _unit})
         if not rows:
             return DimensionResult.empty("仓单库存", note="无法获取仓单数据")
         wdf = pd.DataFrame(rows).sort_values("trade_date")

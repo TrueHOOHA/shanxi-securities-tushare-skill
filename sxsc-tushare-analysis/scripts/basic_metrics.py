@@ -38,14 +38,35 @@ def calc_cagr(start_value, end_value, days):
 
 
 def calc_ma(df_close, windows=(5, 10, 20, 60)):
-    """均线值（用于判断多头/空头排列）。"""
-    return {f"MA{w}": round(float(df_close.tail(w).mean()), 2) for w in windows}
+    """均线值（用于判断多头/空头排列）。
+
+    窗口数据不足时该窗口返回 None：不能用短窗口均值冒充 MA60
+    （30 个点算出的"MA60"与真实 60 日均线完全不同）。
+    """
+    out = {}
+    for w in windows:
+        if len(df_close) < w:
+            out[f"MA{w}"] = None
+        else:
+            out[f"MA{w}"] = round(float(df_close.tail(w).mean()), 2)
+    return out
 
 
-def calc_volatility(df_close, window=20):
-    """年化波动率。"""
+def calc_volatility(df_close, window: Optional[int] = None):
+    """年化波动率。
+
+    ⚠️ 默认用**全样本**收益率，与 calc_max_drawdown / calc_sharpe 口径一致——
+    旧实现默认只取近 20 日收益率，导致同一句结论里"年化波动"（近20日窗口）
+    与"最大回撤/夏普"（全样本）混用窗口（实测同序列 20 日波动 37.35% vs
+    全样本 31.54%）。需要短期波动率时显式传 window。
+    """
     ret = df_close.pct_change().dropna()
-    return round(ret.tail(window).std() * np.sqrt(250) * 100, 2)
+    if len(ret) < 2:
+        return None
+    sample = ret if window is None else ret.tail(window)
+    if len(sample) == 0:
+        return None
+    return round(float(sample.std()) * np.sqrt(250) * 100, 2)
 
 
 def calc_max_drawdown(df_nav):

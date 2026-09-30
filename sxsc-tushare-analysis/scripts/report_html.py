@@ -183,8 +183,10 @@ _NUM_RE = re.compile(r"^[-+]?[0-9][0-9,]*(?:\.[0-9]+)?(?:%|亿|万|万亿|元)?$
 _MISSING = {"N/A", "-", "—", "NA", "None", "nan"}
 # 含中文（含全角标点）的单元格一律视为文本：数值列不应出现中文描述
 _HAS_CJK = re.compile(r"[\u4e00-\u9fff\uff00-\uffef]")
-# 日期（YYYYMMDD / YYYY-MM-DD / YYYY-MM）：形似数字但属文本列，须左对齐
-_DATE_RE = re.compile(r"^\d{4}-?\d{2}(-\d{2})?$")
+# 日期（YYYYMMDD 8 位 或 YYYY-MM-DD / YYYY-MM）：形似数字但属文本列，须左对齐。
+# ⚠️ 不能匹配 6 位数字：成交量"100000"这类值会被误判成日期列（YYYYMM），
+# 整列变成文本左对齐（样式错）。8 位整串或带横线的完整日期才判日期。
+_DATE_RE = re.compile(r"^(?:\d{8}|\d{4}-\d{2}(?:-\d{2})?)$")
 # 表头日期/标识列关键词（中英文）：这些列的值即便形似数字也按文本左对齐
 _DATE_KEY = re.compile(
     r"(日期|时间|日$|date|trade_date|end_date|ann_date|start_date|float_date|ex_date)", re.I)

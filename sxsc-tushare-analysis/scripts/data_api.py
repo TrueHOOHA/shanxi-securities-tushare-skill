@@ -761,5 +761,14 @@ class DataAPI:
     def get_fut_wsr(self, trade_date: str) -> Optional[pd.DataFrame]:
         return self._fut_sdk_call("fut_wsr", {"trade_date": trade_date})
 
+    def get_fut_wsr_range(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """仓单日报（区间）。
+
+        接口入参为 trade_date/symbol/start_date/end_date/exchange（trade_date 与
+        symbol 至少一个）。原实现只支持单日调用，仓单维度要按自然日采样 13 次
+        单日调用且非交易日被静默丢弃；改用区间一次取数（实测可用，返回含 unit 列）。
+        """
+        return self._fut_sdk_call("fut_wsr", {"symbol": symbol, "start_date": start_date, "end_date": end_date})
+
     def get_fut_settle(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         return self._fut_sdk_call("fut_settle", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date})

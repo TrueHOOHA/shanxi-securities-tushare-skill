@@ -15,6 +15,7 @@
 
 import os
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -30,6 +31,12 @@ from factor_signals import calc_amplitude_momentum, calc_quantitative_momentum
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
 from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
+
+
+# index_weight 是月度数据且被"成分权重""行业分布"两个维度并行消费；
+# 进程级缓存避免同一份报告里重复取数（审计发现每次多调一次接口）。
+_INDEX_WEIGHT_CACHE: Dict[tuple, Optional[pd.DataFrame]] = {}
+_INDEX_WEIGHT_LOCK = threading.Lock()
 
 
 def _today() -> str:
@@ -281,11 +288,26 @@ class IndexAnalysisRunner:
 
     # ---------- 维度：成分权重 ----------
 
+    def _get_index_weight_cached(self, start: str, end: str) -> Optional[pd.DataFrame]:
+        """index_weight 区间取数（进程级缓存）。
+
+        "成分权重"与"行业分布"两个维度并行执行都会取同区间权重，
+        不缓存会重复调用接口（审计发现）。键 = (index_code, start, end)。
+        """
+        key = (self.ts_code, start, end)
+        with _INDEX_WEIGHT_LOCK:
+            if key in _INDEX_WEIGHT_CACHE:
+                return _INDEX_WEIGHT_CACHE[key].copy() if _INDEX_WEIGHT_CACHE[key] is not None else None
+        df = self.api.get_index_weight(self.ts_code, start, end)
+        with _INDEX_WEIGHT_LOCK:
+            _INDEX_WEIGHT_CACHE[key] = df
+        return df
+
     @safe_result("成分权重")
     def analyze_weight(self) -> DimensionResult:
         # index_weight 为月度数据，取最近一个月末
         start = shift_date(self.end_date, -40)
-        df = self.api.get_index_weight(self.ts_code, start, self.end_date)
+        df = self._get_index_weight_cached(start, self.end_date)
         if df is None or df.empty:
             return DimensionResult.empty("成分权重", note="无法获取成分权重")
 
@@ -328,7 +350,7 @@ class IndexAnalysisRunner:
     def analyze_sector(self) -> DimensionResult:
         # 用 index_weight 获取成分股（index_member 仅适用于申万行业指数）
         start = shift_date(self.end_date, -40)
-        df_w = self.api.get_index_weight(self.ts_code, start, self.end_date)
+        df_w = self._get_index_weight_cached(start, self.end_date)
         if df_w is None or df_w.empty:
             return DimensionResult.empty("行业分布", note="无法获取指数成分股")
 

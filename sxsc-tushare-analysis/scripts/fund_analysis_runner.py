@@ -184,7 +184,7 @@ class FundAnalysisRunner:
                         if len(_diff) >= 60:
                             etf_check = etf_check or {}
                             etf_check["benchmark_code"] = _bcode
-                            etf_check["tracking_error_ann_pct"] = round(float(_diff["etf"].sub(_diff["idx"]).std() * (252 ** 0.5) * 100), 2)
+                            etf_check["tracking_error_ann_pct"] = round(float(_diff["etf"].sub(_diff["idx"]).std() * (250 ** 0.5) * 100), 2)
             except Exception:
                 etf_check = etf_check if isinstance(etf_check, dict) else None
 
