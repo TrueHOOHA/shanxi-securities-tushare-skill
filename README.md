@@ -90,7 +90,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 | 项 | 必需 | 缺失后果 |
 |---|---|---|
 | `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，退出码非 0 |
-| `sxsc_tushare` 库已安装 | 否 | 有 → SDK 方式；无 → HTTP 协议方式 |
+| `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
 ---
 
@@ -141,7 +141,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ### 参考模板
 
-`scripts/` 下的 `*_demo.py` 是 **Agent 调取数据时的参考模板**（非可执行脚本），每个接口同时提供 **SDK 与 HTTP 两种调用方式**，由 Agent 按环境校验结果（`mode` 字段）选择其一复制调用。
+`scripts/` 下的 `*_demo.py` 是 **Agent 调取数据时的参考模板**（非可执行脚本），每个接口提供 **SDK 调用方式**，由 Agent 复制调用。
 
 | 文件 | 覆盖接口 |
 |---|---|
@@ -235,7 +235,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 模块 | 覆盖函数 |
 |------|---------|
-| `data_api.py` | `DataAPI`/`shift_date`/`ensure_sorted`/`drop_t0_placeholder`/`safe_call`（统一数据访问层：SDK/HTTP 双模式取数，内置 T-0 占位行过滤，覆盖股票/指数/基金/期货/财务/资金流等接口） |
+| `data_api.py` | `DataAPI`/`shift_date`/`ensure_sorted`/`drop_t0_placeholder`/`safe_call`（统一数据访问层：SDK 取数，内置 T-0 占位行过滤，覆盖股票/指数/基金/期货/财务/资金流等接口） |
 | `basic_metrics.py` | `calc_returns`/`calc_cagr`/`calc_ma`/`calc_volatility`/`calc_max_drawdown`/`calc_sharpe`/`calc_sortino`/`calc_information_ratio` |
 | `adjustment.py` | `apply_adj_factor`/`apply_fund_adj`/`apply_etf_adj`/`rebase_series`/`compare_returns`/`calc_percentile_rank`/`winsorize_cross_section` |
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
@@ -269,7 +269,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 └── sxsc-tushare-analysis/                     # 分析 skill（负责综合分析）
     ├── SKILL.md                               # 综合分析执行规范入口
     └── scripts/
-        ├── data_api.py                        # 统一数据访问层（DataAPI：SDK/HTTP 双模式取数）
+        ├── data_api.py                        # 统一数据访问层（DataAPI：SDK 取数）
         ├── result_model.py                    # 分析结果数据模型
         ├── report_html.py                   # HTML 报告渲染器（markdown→HTML + ECharts 图表 + KPI 速览条）
         ├── analysis_runner.py                 # 股票综合分析 Runner（stock_report）

@@ -25,16 +25,14 @@ description: >
 每次执行按这个顺序：
 
 1. **环境校验** — 检查 `scripts/env_check.json` 缓存是否存在：
-   - 有 → 直接读取，取 `mode` 字段（`sdk`/`http`）决定取数方式。
-   - 无 → 先运行 `python scripts/check_env.py` 生成缓存，再读取。
-   - 退出码非 0（token 缺失）→ 停下，先提示用户配置 `SXSC_TUSHARE_TOKEN`，**不得进入取数**。
+   - 有 → 直接读取，确认 `token_set`、`sdk_available`、`sdk_init_ok` 均为 true。
+   - 无 → 先运行 `python scripts/check_env.py` 生成缓存，再读取（未安装 `sxsc_tushare` 时会自动 `pip install sxsc_tushare`）。
+   - 退出码非 0 → 停下，先按提示解决环境（配置 `SXSC_TUSHARE_TOKEN` 或安装 `sxsc_tushare`），**不得进入取数**。
 2. **理解任务** — 识别用户要解决什么问题（见下方"任务分类"）。
 3. **解析标的** — 名称/代码 → 标准 `ts_code`（如 `600519.SH`）；市场、时间窗、字段按默认值补全。
 4. **查表选接口** — 先查 `references/API接口对应表.md` 拿到 `pro.api_name` 与对应文档路径，**禁止凭记忆写接口**。
 5. **校验参数** — 日期 `YYYYMMDD`、起止顺序、冲突裁决、未来日期裁剪（规则见下方"关键默认值"第 71–73 行）。
-6. **取数执行** — 按第 1 步的 `mode` 选择方式：
-   - `sdk`：参考 `scripts/` 下模板（`stock_data_demo.py`、`fund_data_demo.py`、`index_sector_demo.py`、`fin_report_demo.py`、`moneyflow_demo.py`）的 SDK 函数，走 `references/调取数据.md` 的 Python SDK 节。
-   - `http`：参考模板中的 HTTP 函数（`http_call`），走 `references/调取数据.md` 的 HTTP 协议节（无 SDK 依赖）。
+6. **取数执行** — 统一走 `sxsc_tushare` Python SDK：参考 `scripts/` 下模板（`stock_data_demo.py`、`fund_data_demo.py`、`index_sector_demo.py`、`fin_report_demo.py`、`moneyflow_demo.py`）的 SDK 函数，按 `references/调取数据.md` 的 Python SDK 节调用。
 7. **结构化交付** — 一句话结论 → 口径 → 关键指标/表 → 风险/限制 → 文件路径。
 
 **关键原则**：先想"这是什么任务、走哪条工作流"，再想"用哪个接口"。**永远不要先翻接口名**。**取数前先确认环境就绪**（第 1 步），token 缺失时任何取数都无意义。
@@ -97,18 +95,18 @@ python scripts/check_env.py --check  # 只校验不写缓存
 | 项 | 必需 | 缺失后果 |
 |---|---|---|
 | `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，返回非零退出码，需先配置环境变量 |
-| `sxsc_tushare` 库已安装 | 否 | 有 → 走 SDK 方式（`sxsc_tushare`）；无 → 走 HTTP 协议方式 |
+| `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
-- 退出码非 0 表示 token 缺失，**先解决环境再取数**。
+- 退出码非 0 表示环境未就绪（token 缺失、SDK 未安装或初始化失败），**先解决环境再取数**。
 - 缓存仅存储 token_set 状态与 SDK 安装信息，不保存 token 本身或其哈希；token_set=true 时直接复用缓存。
-- 取数方式按校验结果 `mode` 字段选择：`sdk` 用 `references/调取数据.md` 的 Python SDK 节，`http` 用 HTTP 协议节。
+- 取数统一走 `sxsc_tushare` Python SDK，按 `references/调取数据.md` 的 Python SDK 节调用。
 
 ## References 快速索引
 
 | 用途 | 路径 |
 |---|---|
 | 接口名 ↔ 文档映射 | `references/API接口对应表.md` |
-| 安装与 HTTP 调取 | `references/调取数据.md` |
+| 安装与 SDK 调取 | `references/调取数据.md` |
 | 股票调用模板 | `scripts/stock_data_demo.py` |
 | 基金调用模板 | `scripts/fund_data_demo.py` |
 | 指数/行业调用模板 | `scripts/index_sector_demo.py` |

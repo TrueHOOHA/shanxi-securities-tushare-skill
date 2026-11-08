@@ -603,23 +603,6 @@ def _norm_dim(name) -> str:
     return re.sub(r"\s+", "", s)
 
 
-def _channel_note_html() -> str:
-    """页脚的数据通道降级提示（如 SDK 不可用改走 HTTP）。
-
-    DataAPI 在 SDK 初始化失败时会自动降级为 HTTP，取数结果不变但通道已切换。
-    这里把降级原因写入报告，避免"以为走 SDK、实际走 HTTP"的排查盲区。
-    """
-    try:
-        from data_api import data_channel_note
-
-        note = data_channel_note()
-    except Exception:
-        return ""
-    if not note:
-        return ""
-    return f"<br><span style='color:#9aa0a8'>数据通道提示：{_html.escape(note)}</span>"
-
-
 def render_html_report(md_text: str, results) -> str:
     """markdown 报告 + 图表数据 → 完整 HTML 页面字符串。
 
@@ -752,7 +735,7 @@ def render_html_report(md_text: str, results) -> str:
         f"<style>{_CSS}</style></head><body>"
         + "<div class='layout'>" + toc_html + "<main class='content'>"
         + body_html
-        + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）{_channel_note_html()}</div>"
+        + f"<div class='footer'>报告生成于 {datetime.now():%Y-%m-%d %H:%M} · 数据来自山西证券 Tushare（T-1）</div>"
         + "</main></div>"
         + f"<script>const CHARTS = {chart_js};{_INIT_JS}</script>"
         + "</body></html>"

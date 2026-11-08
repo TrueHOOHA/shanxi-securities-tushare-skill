@@ -4,7 +4,7 @@
 统一数据访问层（Data API）。
 
 职责：
-- 封装 SDK / HTTP 双模式切换
+- 封装 SDK 取数
 - 提供股票、指数、基金、财务、资金流等统一取数接口
 - 统一处理：T-0 占位行过滤、排序、字段校验、异常降级
 
@@ -24,11 +24,6 @@ from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 
 
-# ---------- 数据通道提示 ----------
-# SDK 初始化失败会自动降级为 HTTP 协议。降级本身不影响取数结果，但必须显式暴露，
-# 否则日志与报告都看不出实际走的是哪条通道（曾出现 check_env 报 sdk、实际走 http 的情况）。
-_CHANNEL_NOTES: List[str] = []
-
 # ---------- 取数错误记录 ----------
 # 服务端对不存在的字段/非法参数会返回 {"code": 40101, "msg": "接口xxx不包含字段yyy"}。
 # 早期实现直接 `return None` 把 msg 丢掉了，使"字段名写错"与"确实没有数据"完全同形，
@@ -45,11 +40,6 @@ def _record_error(api_name: str, reason: str, detail: str = "") -> bool:
             return False
     _ERRORS.append({"api": api_name, "reason": reason, "detail": detail, "count": 1})
     return True
-
-
-def data_channel_note() -> Optional[str]:
-    """返回本进程内数据通道的降级说明；无降级时返回 None。"""
-    return "；".join(dict.fromkeys(_CHANNEL_NOTES)) or None
 
 
 def data_errors() -> List[Dict[str, Any]]:
@@ -106,7 +96,7 @@ def shift_trade_days(date_str: str, days: int, api: Optional["DataAPI"] = None) 
 
 
 # ---------- 进程级速率限制器 ----------
-# 多维度并行取数时，所有 SDK/HTTP 调用共享同一个限流器，
+# 多维度并行取数时，所有 SDK 调用共享同一个限流器，
 # 确保每秒请求不超过 MAX_RPS 次，避免触发服务端限流/封禁。
 _MAX_RPS = 30
 _rate_lock = threading.Lock()
@@ -172,45 +162,19 @@ def safe_call(func: Callable[..., pd.DataFrame], *args, **kwargs) -> Optional[pd
 class DataAPI:
     """山西证券 Tushare 统一数据访问接口。"""
 
-    DEFAULT_HTTP_URL = "http://221.204.19.233:7172"
-
-    def __init__(self, mode: Optional[str] = None, env: str = "prd"):
+    def __init__(self, env: str = "prd"):
         """
         Args:
-            mode: "sdk" 或 "http"，None 时自动检测
             env: "prd"（仿真/纯 Python）或 "qa"（生产）
         """
         self.env = env
         self.token = os.getenv("SXSC_TUSHARE_TOKEN")
-        self.http_url = os.getenv("SXSC_TUSHARE_HTTP_URL") or self.DEFAULT_HTTP_URL
         # tushare 数据为 T-1：最新可用日期 = 昨天（自然日-1），接口层据此裁剪避免取到 T-0 占位行
         self._t_minus_1 = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
-        if mode is None:
-            self.mode = self._detect_mode()
-        else:
-            self.mode = mode
-
-        self._pro = None
-        if self.mode == "sdk":
-            try:
-                import sxsc_tushare as sx
-                sx.set_token(self.token)
-                self._pro = sx.get_api(env=self.env)
-            except Exception as exc:
-                # SDK 初始化失败时降级为 HTTP（记录并提示，避免静默降级）
-                self.mode = "http"
-                note = f"SDK 初始化失败，已降级为 HTTP 协议（{type(exc).__name__}: {exc}）"
-                if note not in _CHANNEL_NOTES:
-                    _CHANNEL_NOTES.append(note)
-                print(f"[data_api] {note}", file=sys.stderr)
-
-    def _detect_mode(self) -> str:
-        try:
-            import sxsc_tushare as sx  # noqa: F401
-            return "sdk"
-        except ImportError:
-            return "http"
+        import sxsc_tushare as sx
+        sx.set_token(self.token)
+        self._pro = sx.get_api(env=self.env)
 
     def _cap_dates(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """裁剪 end_date/trade_date 不超过 T-1（tushare 只有 T-1 数据，避免取到 T-0 占位行）。
@@ -224,51 +188,18 @@ class DataAPI:
                 capped[k] = self._t_minus_1
         return capped
 
-    def _api(self):
-        if self.mode == "sdk":
-            return self._pro
-        return None
-
-    def _http_call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
-        """HTTP 通用调用。
-
-        服务端对不存在的字段/非法参数返回 code != 0 并附带 msg；早期实现把它丢掉了，
-        使"字段名写错"与"确实无数据"同形。现在记入 _ERRORS 并打 stderr（同一错误只打一次）。
-        """
-        if not self.token:
-            if _record_error(api_name, "缺少 token", "环境变量 SXSC_TUSHARE_TOKEN 未设置"):
-                print("[data_api] 未设置 SXSC_TUSHARE_TOKEN，无法取数", file=sys.stderr)
-            return None
-        try:
-            import requests
-            resp = requests.post(
-                self.http_url,
-                json={"api_name": api_name, "token": self.token, "params": params, "fields": fields},
-                timeout=60,
-            )
-            data = resp.json()
-            if data.get("code") != 0:
-                msg = data.get("msg") or data.get("message") or f"code={data.get('code')}"
-                if _record_error(api_name, str(msg), f"params={params} fields={fields}"):
-                    print(f"[data_api] 取数失败 {api_name}: {msg}", file=sys.stderr)
-                return None
-            return pd.DataFrame(data["data"]["items"], columns=data["data"]["fields"])
-        except Exception as exc:
-            if _record_error(api_name, f"HTTP 调用异常（{type(exc).__name__}）", str(exc)):
-                print(f"[data_api] HTTP 调用异常 {api_name}: {type(exc).__name__}: {exc}", file=sys.stderr)
-            return None
-
     def _call(self, api_name: str, params: Dict[str, Any], fields: str) -> Optional[pd.DataFrame]:
-        """统一调用：SDK 优先，否则 HTTP。"""
+        """统一 SDK 调用。"""
         _acquire_rate_slot()
         # share_float 查未来解禁计划，end_date 是未来窗口上界，不裁剪
         if api_name != "share_float":
             params = self._cap_dates(params)
-        if self.mode == "sdk" and self._pro is not None:
-            api = getattr(self._pro, api_name, None)
-            if api is not None:
-                return safe_call(api, **params, fields=fields)
-        return self._http_call(api_name, params, fields)
+        api = getattr(self._pro, api_name, None)
+        if api is not None:
+            return safe_call(api, **params, fields=fields)
+        if _record_error(api_name, "接口不存在", f"SDK 无 {api_name} 方法"):
+            print(f"[data_api] SDK 无接口 {api_name}", file=sys.stderr)
+        return None
 
     # ---------- A 股基础 ----------
 
@@ -708,14 +639,15 @@ class DataAPI:
     # ---------- 期货 ----------
 
     def _fut_sdk_call(self, api_name: str, params: Dict[str, Any], fields: str = "") -> Optional[pd.DataFrame]:
-        """期货接口SDK调用：不传fields，规避定制SDK字段名校验，返回全字段本地选列。"""
+        """期货接口 SDK 调用：不传 fields，规避定制 SDK 字段名校验，返回全字段本地选列。"""
         _acquire_rate_slot()
         params = self._cap_dates(params)
-        if self.mode == "sdk" and self._pro is not None:
-            api = getattr(self._pro, api_name, None)
-            if api is not None:
-                return safe_call(api, **params)
-        return self._http_call(api_name, params, fields)
+        api = getattr(self._pro, api_name, None)
+        if api is not None:
+            return safe_call(api, **params)
+        if _record_error(api_name, "接口不存在", f"SDK 无 {api_name} 方法"):
+            print(f"[data_api] SDK 无接口 {api_name}", file=sys.stderr)
+        return None
 
     def get_fut_basic(self, exchange: Optional[str] = None, fut_type: Optional[str] = None,
                       ts_code: Optional[str] = None) -> Optional[pd.DataFrame]:
