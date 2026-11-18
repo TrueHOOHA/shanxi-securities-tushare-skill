@@ -209,7 +209,7 @@ class FutAnalysisRunner:
             holding_df = self.api.get_fut_holding(self.main_contract, shift_date(self.end_date, -20), self.end_date)
         if (holding_df is None or holding_df.empty):
             # ⚠️ 状态必须如实标注：拿不到持仓排名数据就是 EMPTY（含降级产物），
-            # 不能再返回 success——否则风险提示的"数据缺失说明"（status != SUCCESS）永不触发。
+            # 不能再返回 success——否则风险节"数据说明"（status != SUCCESS）永不触发。
             # fut_holding 现在按 symbol 查询（服务端 schema 是 symbol 非 ts_code，见 data_api），
             # DCE 品种应能取到数据；取不到多数是该品种确实无持仓排名。
             note = (f"fut_holding 持仓排名接口仅覆盖大商所(DCE)，{EXCHANGE_MAP.get(suf,(None,'该交易所'))[1]}无持仓排名数据"
@@ -537,7 +537,7 @@ class FutAnalysisRunner:
                 notes = res.data.get("notes", [])
                 if notes:
                     lines.append("")
-                    lines.append("**数据缺失说明**：")
+                    lines.append("**数据说明**：")
                     for n in notes:
                         lines.append(f"- {n}")
             lines.append("")

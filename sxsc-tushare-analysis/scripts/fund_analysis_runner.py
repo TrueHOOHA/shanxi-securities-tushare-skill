@@ -752,7 +752,9 @@ class FundAnalysisRunner:
             if dim == "risk":
                 continue
             if res.status != ResultStatus.SUCCESS:
-                notes.append(f"{dim}：{res.note or '数据缺失'}")
+                # 用中文维度名，不能把内部 key 直接印进报告
+                label = self.DIM_TITLES.get(dim, res.title or dim)
+                notes.append(f"{label}：{res.note or '无数据'}")
 
         return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes}, risks=risks)
 
@@ -937,7 +939,7 @@ class FundAnalysisRunner:
                 notes = res.data.get("notes", [])
                 if notes:
                     lines.append("")
-                    lines.append("**数据缺失说明**：")
+                    lines.append("**数据说明**：")
                     for n in notes:
                         lines.append(f"- {n}")
             else:
@@ -1172,7 +1174,7 @@ class FundAnalysisRunner:
             notes = data.get("notes", [])
             if notes:
                 lines.append("")
-                lines.append("**数据缺失说明**：")
+                lines.append("**数据说明**：")
                 for n in notes:
                     lines.append(f"- {n}")
 
