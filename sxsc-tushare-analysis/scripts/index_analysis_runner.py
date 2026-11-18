@@ -830,7 +830,6 @@ class IndexAnalysisRunner:
         valuation = self.results.get("valuation")
         weight = self.results.get("weight")
         margin = self.results.get("margin")
-        macro = self.results.get("macro")
 
         trend_ok = trend and trend.is_ok() and trend.data
         val_ok = valuation and valuation.is_ok() and valuation.data
@@ -914,17 +913,19 @@ class IndexAnalysisRunner:
                 style_parts.append("低估值")
         if trend_ok:
             vol = self._f(self._v(trend.data, "volatility"))
-            beta_approx = self._f(self._v(trend.data, "returns", "近250日涨幅%"))
-            bench250 = self._f(self._v(trend.data.get("benchmark") or {}, "returns", "近250日涨幅%"))
+            bench_vol = self._f(self._v(trend.data.get("benchmark") or {}, "volatility"))
             if vol is not None and vol > 30:
                 style_parts.append("高波动/成长型")
             elif vol is not None and vol < 15:
                 style_parts.append("低波动/稳健型")
-            if beta_approx is not None and bench250 is not None and bench250 != 0:
-                rs = beta_approx / bench250
-                if rs > 1.5:
+            # 用「指数波动率 / 基准波动率」衡量相对弹性（Beta 需回归，指数维度未计算）。
+            # 旧实现用 250 日收益之比：基准收益为负时比值变号，会把跑赢基准的指数
+            # 错判成"防御型"。
+            if vol is not None and bench_vol is not None and bench_vol > 0:
+                _vr = vol / bench_vol
+                if _vr > 1.2:
                     style_parts.append("高弹性")
-                elif rs < 0.5:
+                elif _vr < 0.8:
                     style_parts.append("防御型")
 
         if style_parts:
@@ -1206,10 +1207,8 @@ class IndexAnalysisRunner:
 
     def _valuation_eval(self, data):
         pe = self._f(data.get("pe"))
-        pb = self._f(data.get("pb"))
         pe_hist = self._f(data.get("pe_hist_percentile"))
         pb_hist = self._f(data.get("pb_hist_percentile"))
-        is_est = bool(data.get("source"))
         parts = []
         if pe_hist is not None:
             if pe_hist > 80:
@@ -1277,7 +1276,11 @@ if __name__ == "__main__":
         help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
-    report = index_report(args.ts_code, args.end_date)
+    try:
+        report = index_report(args.ts_code, args.end_date)
+    except RuntimeError as exc:  # token 文件缺失/无效等环境问题，给可操作提示而非 traceback
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(1)
     output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)

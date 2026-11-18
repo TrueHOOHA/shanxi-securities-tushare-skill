@@ -316,8 +316,14 @@ class FutAnalysisRunner:
                 return DimensionResult.empty("仓单库存", note=f"无 {self.symbol} 仓单数据")
             daily = w.groupby("trade_date", sort=False)["vol"].sum().reset_index()
             daily = daily.sort_values("trade_date")
-            # 交易日采样（约每 5 个交易日一条，保持"近 N 期"的均匀性）
-            daily = daily.iloc[::5]
+            # 交易日采样（约每 5 个交易日一条，保持"近 N 期"的均匀性）。
+            # ⚠️ iloc[::5] 从首行起采样，尾部不足 5 行的交易日会被丢弃，
+            # 导致"最新仓单"实际落后数个交易日（实测 RB 报告 20260928、实际 20260930；
+            # JM 报告 20260916、实际 20260922）。采样后强制补上真正的最后一条。
+            _sampled = daily.iloc[::5]
+            if _sampled.iloc[-1]["trade_date"] != daily.iloc[-1]["trade_date"]:
+                _sampled = pd.concat([_sampled, daily.tail(1)], ignore_index=True)
+            daily = _sampled.sort_values("trade_date")
             for _, r in daily.iterrows():
                 _sub = w[w["trade_date"] == r["trade_date"]]
                 _unit = str(_sub.iloc[0].get("unit")) if "unit" in _sub.columns else None
@@ -572,7 +578,7 @@ class FutAnalysisRunner:
             lines.append("")
             lines.append(self._md(pd.DataFrame(tech)))
             lines.append("")
-            lines.append(f"**分析评价**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI超买(>70)/超卖(<30)为短期状态指标。")
+            lines.append("**分析评价**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI超买(>70)/超卖(<30)为短期状态指标。")
         elif res.title == "持仓分析":
             if res.status == ResultStatus.SUCCESS and data.get("holding_records"):
                 # 精选列并中文标注：原始行含 vol_chg/long_chg 等大量 NaN 字段，
@@ -713,7 +719,11 @@ if __name__ == "__main__":
         help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
-    report = fut_report(args.ts_code, args.end_date)
+    try:
+        report = fut_report(args.ts_code, args.end_date)
+    except RuntimeError as exc:  # token 文件缺失/无效等环境问题，给可操作提示而非 traceback
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(1)
     output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)

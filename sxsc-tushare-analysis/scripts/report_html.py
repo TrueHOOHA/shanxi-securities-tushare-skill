@@ -652,7 +652,6 @@ def render_html_report(md_text: str, results) -> str:
         if lead:
             parts.append(md_to_html("\n".join(lead)))
 
-        key = _norm_dim(heading)
         # 正文占位符 `<!--chart:维度名-->`：就地插入该维度图表
         body = body[k:]
         placeholders = [i for i, ln in enumerate(body) if _CHART_PH.match(ln.strip())]

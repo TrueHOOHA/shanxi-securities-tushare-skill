@@ -259,7 +259,17 @@ class FundAnalysisRunner:
         if df is None or df.empty:
             return DimensionResult.empty("基金经理", note="无法获取基金经理信息")
 
-        df = df.sort_values("begin_date", ascending=False).reset_index(drop=True)
+        # ⚠️ fund_manager 同时返回历史离任经理（end_date 非空）。原实现按 begin_date
+        # 倒序取第一条，会把已离任者当成"现任"（实测 510300.SH 选中 2015-06-12
+        # 已离任的张娅）。必须先过滤掉 end_date 有效的离任记录，再取在任者。
+        df = df.copy()
+        _end = df["end_date"] if "end_date" in df.columns else pd.Series([None] * len(df))
+        _is_current = _end.isna() | _end.astype(str).str.strip().isin(["", "None", "nan", "NaT"])
+        _current = df[_is_current]
+        if _current.empty:
+            # 无在任记录（已清盘/转型）：退化为最近一条，但不冒充在任判断
+            _current = df.tail(1)
+        df = _current.sort_values("begin_date", ascending=False).reset_index(drop=True)
         latest = df.iloc[0]
         data = {
             "name": latest.get("name"),
@@ -269,7 +279,9 @@ class FundAnalysisRunner:
         if latest.get("begin_date"):
             try:
                 begin = datetime.strptime(str(latest["begin_date"]), "%Y%m%d")
-                data["tenure_days"] = (datetime.now() - begin).days
+                # 任职年限按分析截止日计算；原实现用 datetime.now()，回溯分析时会偏离
+                _ref = datetime.strptime(str(self.end_date), "%Y%m%d")
+                data["tenure_days"] = (_ref - begin).days
             except Exception:
                 pass
 
@@ -291,7 +303,6 @@ class FundAnalysisRunner:
         # 而非 20250630），使持仓分析、风险维度的第一大重仓都用陈旧数据。
         _d = df.dropna(subset=["end_date"])
         latest_period = _d["end_date"].max()
-        latest = df[df["end_date"] == latest_period].sort_values("ann_date").iloc[-1]
 
         # 最新一期持仓，按占股票市值比排序
         latest_holdings = df[df["end_date"] == latest_period].sort_values("stk_mkv_ratio", ascending=False).head(10)
@@ -1304,7 +1315,11 @@ if __name__ == "__main__":
         help="HTML 报告输出路径，默认保存到当前目录 {ts_code}_report.html",
     )
     args = parser.parse_args()
-    report = fund_report(args.ts_code, args.end_date)
+    try:
+        report = fund_report(args.ts_code, args.end_date)
+    except RuntimeError as exc:  # token 文件缺失/无效等环境问题，给可操作提示而非 traceback
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(1)
     output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)

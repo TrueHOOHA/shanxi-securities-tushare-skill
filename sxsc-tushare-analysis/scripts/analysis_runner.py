@@ -53,6 +53,15 @@ def _today() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
+def _shift_month(ym: str, delta: int) -> str:
+    """按自然月偏移 YYYYMM（不能用 -30 天近似：3 月 1 日减 30 天会跳到 1 月，漏掉 2 月）。"""
+    y, m = int(ym[:4]), int(ym[4:6])
+    m += delta
+    y += (m - 1) // 12
+    m = (m - 1) % 12 + 1
+    return f"{y:04d}{m:02d}"
+
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         if value is None or (isinstance(value, float) and np.isnan(value)):
@@ -75,8 +84,10 @@ def _resolve_ts_code(ts_code: str) -> str:
         return f"{ts_code}.SH"
     if ts_code.startswith(("000", "001", "002", "003", "300", "301")):
         return f"{ts_code}.SZ"
-    if ts_code.startswith(("8", "92")):
+    if ts_code.startswith(("430", "8", "92")):
         return f"{ts_code}.BJ"
+    if ts_code.startswith("200"):
+        return f"{ts_code}.SZ"  # 深市 B 股
     return f"{ts_code}.SH"
 
 
@@ -861,7 +872,7 @@ class StockAnalysisRunner:
         br_records = []
         try:
             for _i in range(3):
-                _m = shift_date(self.end_date[:6] + "01", -30 * _i)[:6]
+                _m = _shift_month(self.end_date[:6], -_i)
                 br_df = self.api.get_broker_recommend(_m)
                 if br_df is not None and not br_df.empty:
                     hit = br_df[br_df["ts_code"] == self.ts_code]
@@ -923,15 +934,15 @@ class StockAnalysisRunner:
 
         # 前十大股东/流通股东集中度
         top10_holders = self.api.get_top10_holders(self.ts_code, self.end_date)
-        top10_float_holders = self.api.get_top10_floatholders(self.ts_code, self.end_date)
         top10_summary = None
         if top10_holders is not None and not top10_holders.empty:
             latest_period = top10_holders.sort_values("end_date").iloc[-1]["end_date"]
             latest_top10 = top10_holders[top10_holders["end_date"] == latest_period]
+            _total_ratio = _safe_float(latest_top10["hold_ratio"].sum())
             top10_summary = {
                 "period": latest_period,
                 "holder_count": len(latest_top10),
-                "total_hold_ratio": round(_safe_float(latest_top10["hold_ratio"].sum()), 2),
+                "total_hold_ratio": round(_total_ratio, 2) if _total_ratio is not None else None,
                 "records": latest_top10[["holder_name", "hold_ratio", "hold_change"]].head(10).to_dict("records"),
             }
 
@@ -1436,8 +1447,11 @@ class StockAnalysisRunner:
             if isinstance(debt, (int, float)) and debt > 80:
                 risks.append(f"资产负债率 {debt}% 较高")
             fc = financial.data.get("forecast")
-            if fc and fc.get("type") in ("预减", "首亏", "续亏", "略减") and (self._forecast_days(fc) or 999) <= 150:
-                risks.append(f"业绩预告类型：{fc['type']}（报告期 {fc.get('end_date', '')}）")
+            if fc and fc.get("type") in ("预减", "首亏", "续亏", "略减"):
+                # 不能用 `days or 999`：公告日=分析截止日时 days=0 会被误判为过期
+                _fd = self._forecast_days(fc)
+                if _fd is not None and _fd <= 150:
+                    risks.append(f"业绩预告类型：{fc['type']}（报告期 {fc.get('end_date', '')}）")
 
         moneyflow = self.results.get("moneyflow")
         if moneyflow and moneyflow.is_ok() and moneyflow.data:
@@ -1670,7 +1684,9 @@ class StockAnalysisRunner:
 
     def _forecast_stale(self, fc):
         """预告距今超过 150 天视为过期（期间公司未再发新预告）。"""
-        return (self._forecast_days(fc) or 999) > 150
+        days = self._forecast_days(fc)
+        # ann_date 缺失（None）视为过期；days=0 是合法值（当日公告），不能被 `or 999` 吞掉
+        return days is None or days > 150
 
     def _annualized_roe(self, financial):
         """按报告期年化 ROE（一季报×4 / 中报×2 / 三季报×4/3 / 年报×1），避免半年口径误判盈利强弱。"""
@@ -1938,8 +1954,10 @@ class StockAnalysisRunner:
             if debt is not None and debt > 80:
                 concl_parts.append("资产负债率偏高")
             fc = financial.data.get("forecast") or {}
-            if fc and fc.get("type") in ("预增", "略增") and (self._forecast_days(fc) or 999) <= 150:
-                concl_parts.append(f"业绩预告类型：{fc.get('type')}（报告期 {fc.get('end_date', '')}）")
+            if fc and fc.get("type") in ("预增", "略增"):
+                _fd = self._forecast_days(fc)
+                if _fd is not None and _fd <= 150:
+                    concl_parts.append(f"业绩预告类型：{fc.get('type')}（报告期 {fc.get('end_date', '')}）")
         if mf_ok:
             net5 = self._f(self._v(moneyflow.data, "net_inflow_5d_billion"))
             if net5 is not None and abs(net5) > 2:
@@ -2433,9 +2451,10 @@ class StockAnalysisRunner:
             parts.append(f"营收同比 {rev_f}%、净利润同比 {prof_f}%（同比增速为报告期口径）。")
         except Exception:
             pass
-        comp = data.get("latest", {}).get("grossprofit_margin")
-        if comp is None or comp != comp:
-            parts.append("金融机构毛利率/资产周转率等指标语义与工商业不同，F-Score仅作弱参考。")
+        # 只有 F-Score 明确识别出金融机构（comp_type=2/3/4）时才提示口径差异；
+        # 不能因毛利率缺失就断言是金融机构（非金融公司数据缺失同样会为空）。
+        if fs.get("comp_note"):
+            parts.append(str(fs["comp_note"]).rstrip("。") + "。")
         return "**分析评价**：" + "".join(parts)
 
     def _moneyflow_eval(self, data):
@@ -2597,7 +2616,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dims = args.dimensions.split(",") if args.dimensions else None
-    report = stock_report(args.ts_code, args.end_date, dims)
+    try:
+        report = stock_report(args.ts_code, args.end_date, dims)
+    except RuntimeError as exc:  # token 文件缺失/无效等环境问题，给可操作提示而非 traceback
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(1)
     output = args.output or f"{args.ts_code}_report.html"
     with open(output, "w", encoding="utf-8") as f:
         f.write(report)

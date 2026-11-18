@@ -24,10 +24,9 @@ description: >
 
 每次执行按这个顺序：
 
-1. **环境校验** — 检查 `scripts/env_check.json` 缓存是否存在：
-   - 有 → 直接读取，确认 `token_set`、`sdk_available`、`sdk_init_ok` 均为 true。
-   - 无 → 先运行 `python scripts/check_env.py` 生成缓存，再读取（未安装 `sxsc_tushare` 时会自动 `pip install sxsc_tushare`）。
-   - 退出码非 0 → 停下，先按提示解决环境（配置 `SXSC_TUSHARE_TOKEN` 或安装 `sxsc_tushare`），**不得进入取数**。
+1. **环境校验** — 运行 `python scripts/check_env.py`。脚本会复用有效缓存、自动废弃旧版 `token_set` 缓存，并复核 token 文件与 SDK（未安装 `sxsc_tushare` 时会自动 `pip install sxsc_tushare`）。
+   - 退出码非 0 → 停下，先按提示解决环境（写入 token 文件或安装 `sxsc_tushare`），**不得进入取数**。
+   - 不要手工读取 `env_check.json` 判定环境：旧缓存可能缺少 `token_ok` 字段或已过期，交给脚本刷新。
 2. **理解任务** — 识别用户要解决什么问题（见下方"任务分类"）。
 3. **解析标的** — 名称/代码 → 标准 `ts_code`（如 `600519.SH`）；市场、时间窗、字段按默认值补全。
 4. **查表选接口** — 先查 `references/API接口对应表.md` 拿到 `pro.api_name` 与对应文档路径，**禁止凭记忆写接口**。
@@ -85,7 +84,7 @@ description: >
 执行任取数任务前，先检查环境是否可用（结果缓存到 `scripts/env_check.json`，避免每次重复校验）：
 
 ```bash
-python scripts/check_env.py          # token_set=true 则直接复用缓存，否则实时检测
+python scripts/check_env.py          # token_ok=true 则直接复用缓存，否则实时检测
 python scripts/check_env.py --force  # 强制重新校验并覆盖缓存
 python scripts/check_env.py --check  # 只校验不写缓存
 ```
@@ -94,11 +93,12 @@ python scripts/check_env.py --check  # 只校验不写缓存
 
 | 项 | 必需 | 缺失后果 |
 |---|---|---|
-| `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，返回非零退出码，需先配置环境变量 |
+| token 文件可读（默认 `~/sxsc_tk.csv`，即 `upass.TOKEN_F_P`） | 是 | 无法执行 skill，返回非零退出码，需先写入 token |
 | `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
-- 退出码非 0 表示环境未就绪（token 缺失、SDK 未安装或初始化失败），**先解决环境再取数**。
-- 缓存仅存储 token_set 状态与 SDK 安装信息，不保存 token 本身或其哈希；token_set=true 时直接复用缓存。
+- 退出码非 0 表示环境未就绪（token 文件缺失、SDK 未安装或初始化失败），**先解决环境再取数**。
+- token 写入方式：`python -c "import sxsc_tushare as sx; sx.set_token('你的token')"`；不再使用 `SXSC_TUSHARE_TOKEN` 环境变量。
+- 缓存仅存储 token_ok 状态与 SDK 安装信息，不保存 token 明文或其哈希；token_ok=true 且 token 文件实时可读时直接复用缓存。
 - 取数统一走 `sxsc_tushare` Python SDK，按 `references/调取数据.md` 的 Python SDK 节调用。
 
 ## References 快速索引
@@ -117,12 +117,17 @@ python scripts/check_env.py --check  # 只校验不写缓存
 
 ### 初始化与日线
 ```python
-import sxsc_tushare as sx
 import os
 
-token = os.getenv('SXSC_TUSHARE_TOKEN') or 'YOUR_TOKEN_HERE'
-sx.set_token(token)
-pro = sx.get_api(env='prd')  # 'prd' 仿真, 'qa' 生产
+import pandas as pd
+import sxsc_tushare as sx
+import sxsc_tushare.upass as up
+
+# token 从文件读（文件名随构建而变，统一读 upass.TOKEN_F_P），不用环境变量；
+# 不要用 sx.get_token()——失败时它会向 stdout 打印 "get token error." 噪声。
+_token_path = os.path.join(os.path.expanduser("~"), getattr(up, "TOKEN_F_P", "sxsc_tk.csv"))
+token = pd.read_csv(_token_path, dtype=str)["token"].iloc[0].strip()
+pro = sx.get_api(token, env='prd')  # 'prd' 仿真, 'qa' 生产
 
 # 股票列表
 pro.stock_basic(exchange='', list_status='L',

@@ -5,7 +5,7 @@
 | Skill | 职责 | 适用场景 |
 |-------|------|---------|
 | `shanxi-securities-tushare` | **数据获取**：调用 100+ 金融数据接口，批量取数并结构化交付 | 取数、导出、回测数据准备 |
-| `sxsc-tushare-analysis` | **综合分析**：基于数据 skill 的接口，对标的进行交叉分析并输出报告 | 分析、研究、评估、对比 |
+| `sxsc-tushare-analysis` | **综合分析**：自带取数层，对标的进行交叉分析并输出报告 | 分析、研究、评估、对比 |
 
 ---
 
@@ -41,43 +41,43 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
        └── scripts/
    ```
 
-   > 两个 skill 需放在同一 `skills/` 目录下。分析 skill 依赖数据 skill 的接口表、demo 模板与 `check_env.py`。
+   > 两个 skill **互相独立，可单独安装**：分析 skill 自带取数层（`scripts/data_api.py`）与环境校验（`scripts/check_env.py`），不依赖数据 skill 的文件；两者只共享同一个 `sxsc_tushare` SDK 与 token。
 
-2. 引导用户配置环境变量 `SXSC_TUSHARE_TOKEN`（详见下方「环境变量配置」）。
+2. 引导用户写入 token 文件（详见下方「Token 文件配置」）。
 
-### 环境变量配置
+### Token 文件配置
 
-向用户询问 Token 后，根据其操作系统配置：
+Token 以**明文文件**形式保存在用户主目录，不再使用环境变量。文件路径由 `sxsc_tushare.upass.TOKEN_F_P` 决定（新版构建为 `~/sxsc_tk.csv`，旧构建可能为 `~/jsdata_tk.csv`），内容为两行 csv：首行 `token`，次行 token 值。
 
-**Windows PowerShell（永久生效，仅当前用户）：**
+**推荐：用 SDK 写入（自动生成正确的文件名与格式）**
+
+```bash
+python -c "import sxsc_tushare as sx; sx.set_token('你的token')"
+```
+
+**或手工创建**（Windows / Linux / macOS 通用，注意 UTF-8 无 BOM、两行）：
+
+```bash
+# Linux / macOS（文件名随构建而变，用 TOKEN_F_P 动态拼接，勿硬编码 sxsc_tk.csv）
+python -c "import pathlib, sxsc_tushare.upass as up; p=pathlib.Path.home()/up.TOKEN_F_P; p.write_text('token\n你的token\n', encoding='utf-8'); print(p)"
+```
 
 ```powershell
-[Environment]::SetEnvironmentVariable("SXSC_TUSHARE_TOKEN", "你的token", "User")
+# Windows PowerShell（按实际文件名，旧构建可能是 jsdata_tk.csv）
+"token`n你的token`n" | Out-File -Encoding utf8 $env:USERPROFILE\sxsc_tk.csv
 ```
 
-**Linux / macOS（永久生效，写入 shell 配置文件）：**
+**验证（不打印 token 明文）：**
 
 ```bash
-# bash 用户
-echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.bashrc && source ~/.bashrc
-
-# zsh 用户
-echo 'export SXSC_TUSHARE_TOKEN="你的token"' >> ~/.zshrc && source ~/.zshrc
-```
-
-**验证：**
-
-```bash
-# Linux / macOS
-echo $SXSC_TUSHARE_TOKEN
-
-# Windows PowerShell
-echo $env:SXSC_TUSHARE_TOKEN
+python -c "import sxsc_tushare.upass as up, pathlib; p=pathlib.Path.home()/up.TOKEN_F_P; print(p, p.exists())"
+python shanxi-securities-tushare/scripts/check_env.py --check
+python sxsc-tushare-analysis/scripts/check_env.py --check  # 分析 skill 自带校验，独立安装时用它
 ```
 
 ### 环境校验
 
-配置完成后，可运行校验脚本确认环境就绪，结果缓存到 `shanxi-securities-tushare/scripts/env_check.json`（token 未变则复用，避免每次重复校验）：
+配置完成后，可运行校验脚本确认环境就绪，结果缓存到 `shanxi-securities-tushare/scripts/env_check.json`（token 文件仍可读则复用，避免每次重复校验）：
 
 ```bash
 python shanxi-securities-tushare/scripts/check_env.py          # 用缓存，否则重新校验
@@ -89,7 +89,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 项 | 必需 | 缺失后果 |
 |---|---|---|
-| `SXSC_TUSHARE_TOKEN` 已设置 | 是 | 无法执行 skill，退出码非 0 |
+| `token_ok`（token 文件可读） | 是 | 无法执行 skill，退出码非 0 |
 | `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
 ---
@@ -195,9 +195,9 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ### 工作流
 
-每次执行按此顺序：**环境校验(引用数据 skill 的 check_env.py) → 标的识别(类型+ts_code) → 维度加载(按类型全套) → 逐维取数分析 → 综合报告**。
+每次执行按此顺序：**环境校验(运行本 skill 自带的 `scripts/check_env.py`) → 标的识别(类型+ts_code) → 维度加载(按类型全套) → 逐维取数分析 → 综合报告**。
 
-取数前必须查数据 skill 的 `API接口对应表.md`，引用其 demo 模板，禁止凭记忆写接口。
+取数与字段一律以本 skill 自带的 `scripts/data_api.py` 的 `DataAPI` 方法为准（分析 skill 不依赖数据 skill 的文件），禁止凭记忆写接口。
 
 ### 量化分析方法
 
@@ -269,6 +269,8 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 └── sxsc-tushare-analysis/                     # 分析 skill（负责综合分析）
     ├── SKILL.md                               # 综合分析执行规范入口
     └── scripts/
+        ├── check_env.py                       # 环境校验（token/SDK/鉴权探针）
+        ├── token_util.py                      # token 文件解析（data_api/check_env 共用）
         ├── data_api.py                        # 统一数据访问层（DataAPI：SDK 取数）
         ├── result_model.py                    # 分析结果数据模型
         ├── report_html.py                   # HTML 报告渲染器（markdown→HTML + ECharts 图表 + KPI 速览条）
@@ -287,7 +289,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 ## 注意事项
 
-1. **Token 安全**：不要在代码中硬编码 token，使用环境变量 `SXSC_TUSHARE_TOKEN`
+1. **Token 安全**：不要在代码中硬编码 token；token 以明文存放在用户主目录的 token 文件（`~/sxsc_tk.csv`），不要将其提交到版本库或写入报告
 2. **查表优先**：即使记得接口名称，也要先查 `API接口对应表.md`
 3. **工具无关约束**：核心是先查 `API接口对应表.md`，检索工具可替换。
 4. **环境选择**：纯 Python 和仿真端用 `env='prd'`，生产端用 `env='qa'`

@@ -9,11 +9,10 @@
 - 统一处理：T-0 占位行过滤、排序、字段校验、异常降级
 
 用法：
-    api = DataAPI()
+    api = DataAPI()          # token 从 ~/sxsc_tk.csv 读取，不依赖环境变量
     df = api.get_daily(ts_code="600519.SH", start_date="20250101", end_date="20251231")
 """
 
-import os
 import sys
 import threading
 import time
@@ -22,6 +21,10 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
+
+# token 解析是 data_api 与 check_env 的共用逻辑，放在 token_util 保持单一实现；
+# 这里重新导出，保持 `from data_api import load_token/token_file_path/token_help` 兼容。
+from token_util import load_token, token_file_path, token_help  # noqa: F401
 
 
 # ---------- 取数错误记录 ----------
@@ -138,13 +141,17 @@ def drop_t0_placeholder(df: Optional[pd.DataFrame], price_cols: List[str] = ("cl
     return df.dropna(subset=subset).reset_index(drop=True)
 
 
-def safe_call(func: Callable[..., pd.DataFrame], *args, **kwargs) -> Optional[pd.DataFrame]:
+def safe_call(func: Callable[..., pd.DataFrame], *args, _api_name: Optional[str] = None,
+              **kwargs) -> Optional[pd.DataFrame]:
     """统一 API 调用封装：异常和空结果都返回 None。
 
     注意：返回值无法区分"接口报错"与"确实无数据"（历史设计，调用方依赖 None 判空）。
     因此这里额外把失败原因记入 _ERRORS，异常不再彻底消失。
+
+    SDK 的 pro.xxx 是 functools.partial，没有 __name__；调用方需通过 _api_name
+    显式传入接口名，否则失败记录会全部落成 "unknown"，数据通道诊断失去作用。
     """
-    name = getattr(func, "__name__", "unknown")
+    name = _api_name or getattr(func, "__name__", None) or "unknown"
     try:
         df = func(*args, **kwargs)
     except Exception as exc:
@@ -157,6 +164,9 @@ def safe_call(func: Callable[..., pd.DataFrame], *args, **kwargs) -> Optional[pd
     return df
 
 
+# token_file_path / load_token / token_help 见 token_util.py（本文件顶部已导入并重新导出）
+
+
 # ---------- DataAPI 类 ----------
 
 class DataAPI:
@@ -166,15 +176,25 @@ class DataAPI:
         """
         Args:
             env: "prd"（仿真/纯 Python）或 "qa"（生产）
+
+        Raises:
+            RuntimeError: token 文件缺失/无法解析，或 SDK 初始化失败。
+                ⚠️ get_api 只构造客户端、不校验 token 真伪；token 过期/无效要等首次
+                取数才由服务端报错（safe_call 会记录到 data_errors）。
         """
         self.env = env
-        self.token = os.getenv("SXSC_TUSHARE_TOKEN")
         # tushare 数据为 T-1：最新可用日期 = 昨天（自然日-1），接口层据此裁剪避免取到 T-0 占位行
         self._t_minus_1 = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
         import sxsc_tushare as sx
-        sx.set_token(self.token)
-        self._pro = sx.get_api(env=self.env)
+
+        # 只从 token 文件读，不再用 SXSC_TUSHARE_TOKEN 环境变量；
+        # token 直接传给 get_api，因此不调 set_token、不重写 token 文件（只读主目录也能跑）。
+        self.token = load_token()
+        if not self.token:
+            raise RuntimeError(token_help())
+        self.token_file = token_file_path()
+        self._pro = sx.get_api(self.token, env=self.env)
 
     def _cap_dates(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """裁剪 end_date/trade_date 不超过 T-1（tushare 只有 T-1 数据，避免取到 T-0 占位行）。
@@ -196,7 +216,7 @@ class DataAPI:
             params = self._cap_dates(params)
         api = getattr(self._pro, api_name, None)
         if api is not None:
-            return safe_call(api, **params, fields=fields)
+            return safe_call(api, _api_name=api_name, **params, fields=fields)
         if _record_error(api_name, "接口不存在", f"SDK 无 {api_name} 方法"):
             print(f"[data_api] SDK 无接口 {api_name}", file=sys.stderr)
         return None
@@ -245,7 +265,8 @@ class DataAPI:
     def get_fina_indicator(self, ts_code: str, end_date: str, lookback_days: int = 800,
                            fields: Optional[str] = None) -> Optional[pd.DataFrame]:
         f = fields or ("ts_code,end_date,ann_date,roe,roe_waa,grossprofit_margin,"
-                       "netprofit_margin,eps,debt_to_assets,current_ratio,assets_turn")
+                       "netprofit_margin,eps,debt_to_assets,current_ratio,assets_turn,"
+                       "npta,roa")
         start_date = shift_date(end_date, -lookback_days)
         return self._call("fina_indicator", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date}, f)
 
@@ -482,7 +503,7 @@ class DataAPI:
     def get_index_dailybasic(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """大盘指数每日指标（指数级 PE/PB/市值）。不覆盖部分指数（如科创50），空结果由调用方降级。"""
         return self._call("index_dailybasic", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
-                          "ts_code,trade_date,pe,pb,total_mv")
+                          "ts_code,trade_date,pe,pe_ttm,pb,total_mv")
 
     def get_trade_cal(self, exchange: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         return self._call("trade_cal", {"exchange": exchange, "start_date": start_date, "end_date": end_date},
@@ -600,7 +621,8 @@ class DataAPI:
     def get_balancesheet(self, ts_code: str, end_date: str, lookback_days: int = 800) -> Optional[pd.DataFrame]:
         start_date = shift_date(end_date, -lookback_days)
         return self._call("balancesheet", {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
-                          "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,total_share")
+                          "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,"
+                          "total_share,total_assets")
 
     def get_express(self, ts_code: str, end_date: str, lookback_days: int = 400) -> Optional[pd.DataFrame]:
         """业绩快报（比定期报告更早披露）。"""
@@ -644,7 +666,7 @@ class DataAPI:
         params = self._cap_dates(params)
         api = getattr(self._pro, api_name, None)
         if api is not None:
-            return safe_call(api, **params)
+            return safe_call(api, _api_name=api_name, **params)
         if _record_error(api_name, "接口不存在", f"SDK 无 {api_name} 方法"):
             print(f"[data_api] SDK 无接口 {api_name}", file=sys.stderr)
         return None

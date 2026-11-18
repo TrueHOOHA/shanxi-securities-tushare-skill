@@ -6,6 +6,8 @@
 Agent 按需复制函数，填入实际参数即可。
 """
 
+from typing import Optional
+
 import numpy as np
 
 

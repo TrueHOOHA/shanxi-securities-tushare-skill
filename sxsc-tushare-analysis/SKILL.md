@@ -8,16 +8,16 @@ description: >
 
 # 山西证券 Tushare 综合分析技能
 
-本 skill 配合 `shanxi-securities-tushare` 数据 skill 使用，在后者提供的数据接口之上增加**多维度交叉分析层**，将分散的指标整合为结构化分析报告。
+本 skill 自带取数层与分析层，**可独立运行**：只依赖 `sxsc_tushare` Python SDK 与用户主目录下的 token 文件（默认 `~/sxsc_tk.csv`），不需要同级目录下存在任何其他 skill，也不需要环境变量。
 
 ## 工作原理
 
 把"帮我分析 XX"转化为可执行的**标的识别 → 维度加载 → 取数 → 计算 → 解读 → 报告**流程。
 
-**重要**：本 skill 不封装取数逻辑。取数时引用 `shanxi-securities-tushare/SKILL.md` 的流程规范：
-1. 先运行 `python shanxi-securities-tushare/scripts/check_env.py` 校验环境，**token 缺失时停下**，先提示用户配置。
-2. 调用接口前必须查 `shanxi-securities-tushare/references/API接口对应表.md`，**禁止凭记忆写接口**。
-3. 取数统一走 `sxsc_tushare` Python SDK，参考 `shanxi-securities-tushare/scripts/` 下 demo 模板（`check_env.py` 会自动 `pip install sxsc_tushare`）。
+**重要**：取数与分析全部由本 skill 自带脚本完成，不引用任何外部 skill 的文件路径：
+1. 先运行 `python scripts/check_env.py` 校验环境（token / SDK 安装 / SDK 初始化三项），**失败时停下**，先提示用户配置。
+2. 接口名与字段以 `scripts/data_api.py` 的 `DataAPI` 方法为**唯一来源**，各 Runner 一律通过它取数；**禁止凭记忆直接调 `sxsc_tushare` 原生方法**。
+3. 需要接口字段细节时查 `data_api.py` 里对应方法的 `fields` 参数；未安装 SDK 时 `check_env.py` 会自动 `pip install sxsc_tushare`。token 只从 token 文件读（默认 `~/sxsc_tk.csv`，即 `sx.set_token()` 写入位置），**不使用环境变量**。
 
 ## 快速入口（默认调用）
 
@@ -39,7 +39,7 @@ description: >
 
 每次分析按此顺序：
 
-1. **环境校验** — 运行 `python shanxi-securities-tushare/scripts/check_env.py`，确认 token 与 `sxsc_tushare` 库均可用（未安装会自动 `pip install sxsc_tushare`）。
+1. **环境校验** — 运行 `python scripts/check_env.py`，确认 token 文件可读、`sxsc_tushare` 库及 SDK 初始化均可用（未安装会自动 `pip install sxsc_tushare`）。
 2. **标的识别** — 解析用户表述，确定标的类型 + ts_code。根据代码格式或名称搜索确定。
 3. **维度加载** — 默认加载该标的类型的摘要维度；用户明确指定（如"只看技术面""只看估值"）时仅加载指定维度，避免权限/配额不足与超长输出。"全套固定"为默认上限，可裁剪。
 4. **调用 Runner 分析** — 直接调用对应 Runner 的 `*_report()` / `*_analyze()` 入口；Runner 内部按默认维度并行取数、计算并生成结构化结果。如需自定义维度，通过 `dimensions` 参数裁剪。
@@ -327,12 +327,12 @@ description: >
 
 ## 接口调用规则
 
-- 每次调用前必须查 `shanxi-securities-tushare/references/API接口对应表.md` 确认接口名和文档路径。
-- 环境校验走 `python shanxi-securities-tushare/scripts/check_env.py`。
-- 取数统一走 `sxsc-tushare-analysis/scripts/data_api.py` 的 `DataAPI` 类（SDK 取数，内置 T-0 占位行过滤、安全调用）。
+- 接口名与字段以 `scripts/data_api.py` 的 `DataAPI` 方法定义为唯一来源，新增接口时按同一风格在其中补方法。
+- 环境校验走 `python scripts/check_env.py`。
+- 取数统一走 `scripts/data_api.py` 的 `DataAPI` 类（SDK 取数，内置 T-0 占位行过滤、安全调用）。
   - 各 Runner 通过 `DataAPI` 实例调用接口，如 `api.get_daily(ts_code, start, end)`。
   - 日期推算用 `data_api.shift_date(end_date, -n_days)` 回溯交易日。
-- 分析计算参考 `sxsc-tushare-analysis/scripts/` 下按方法分模块的参考模板：
+- 分析计算参考 `scripts/` 下按方法分模块的参考模板：
   - `basic_metrics.py` — 收益率/MA/波动率/回撤/夏普/Sortino/IR/财务趋势/风险信号
   - `adjustment.py` — 复权处理/序列归一化/收益率对比/历史分位数/`winsorize_cross_section`(截面去极值)
   - `technical_indicators.py` — MACD/RSI/KDJ/布林带/OBV/量比
@@ -404,6 +404,9 @@ description: >
 
 ## 依赖
 
-- `shanxi-securities-tushare` 数据 skill（必须在本项目同级目录下）
-- 环境变量 `SXSC_TUSHARE_TOKEN` 已配置
+- `sxsc_tushare` 库（未安装时 `pip install sxsc_tushare`，`check_env.py` 会自动尝试）
+- token 文件（默认 `~/sxsc_tk.csv`，即 `sx.set_token()` 写入位置；文件名为 `upass.TOKEN_F_P`，旧构建可能为 `jsdata_tk.csv`）
+- Python 3.9+ 与 `numpy` / `pandas`
+
+本 skill 不依赖同级目录下的其他 skill，可单独分发运行。
 - `sxsc_tushare` 库（未安装时 `pip install sxsc_tushare`）

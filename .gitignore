@@ -11,6 +11,7 @@ __pycache__/
 
 # Skill env check cache
 shanxi-securities-tushare/scripts/env_check.json
+sxsc-tushare-analysis/scripts/env_check.json
 
 # Logs
 *.log
