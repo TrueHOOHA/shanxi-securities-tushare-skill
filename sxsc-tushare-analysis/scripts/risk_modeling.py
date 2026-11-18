@@ -142,5 +142,5 @@ def calc_relative_strength(ts_code_returns, benchmark_returns):
     rs = cum_stock / cum_bench
     latest_rs = round(float(rs.iloc[-1]), 3)
     ref_val = rs.iloc[-20] if len(rs) > 20 else rs.iloc[0]
-    trend = "走强" if rs.iloc[-1] > ref_val else "走弱"
+    trend = "上升" if rs.iloc[-1] > ref_val else "下降"
     return {"RS": latest_rs, "trend": trend}

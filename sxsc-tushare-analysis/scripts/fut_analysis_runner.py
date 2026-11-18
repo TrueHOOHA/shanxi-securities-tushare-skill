@@ -393,16 +393,16 @@ class FutAnalysisRunner:
         if trend and trend.is_ok() and trend.data:
             vol = trend.data.get("volatility"); mdd = trend.data.get("max_drawdown")
             rsi = trend.data.get("rsi", {})
-            if isinstance(vol, (int, float)) and vol > 30:
-                risks.append(f"年化波动率 {vol}% 偏高")
-            if isinstance(mdd, (int, float)) and mdd < -20:
-                risks.append(f"最大回撤 {mdd}% 较深")
+            if isinstance(vol, (int, float)):
+                risks.append(f"年化波动率 {vol}%")
+            if isinstance(mdd, (int, float)):
+                risks.append(f"最大回撤 {mdd}%")
             rsi_v = rsi.get("RSI")
             if isinstance(rsi_v, (int, float)):
                 if rsi_v > 70:
-                    risks.append(f"RSI {rsi_v} 高于 70（超买）")
+                    risks.append(f"RSI {rsi_v}（高于 70）")
                 elif rsi_v < 30:
-                    risks.append(f"RSI {rsi_v} 低于 30（超卖）")
+                    risks.append(f"RSI {rsi_v}（低于 30）")
         _settle_res = self.results.get("settle")
         _mr_v = self._f((_settle_res.data or {}).get("latest_margin_rate")) if _settle_res and _settle_res.is_ok() else None
         risks.append("期货为保证金交易" + (f"（最新保证金率 {_mr_v*100:.0f}%，名义杠杆约 {1/_mr_v:.1f} 倍）" if _mr_v and _mr_v > 0 else "，盈亏随杠杆同步放大") + "，交易制度上实行每日无负债结算")
@@ -417,7 +417,7 @@ class FutAnalysisRunner:
             notes.append("结算参数：fut_settle 无连续合约数据，保证金率等暂缺")
         notes.append("主力合约：基差需现货价，Tushare无现货接口")
         if not risks:
-            risks.append("未发现显著风险信号（基于已有维度）")
+            risks.append("未列示额外风险指标")
         return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes}, risks=risks)
 
     # ---------- 执行入口 ----------
@@ -449,13 +449,13 @@ class FutAnalysisRunner:
 
     # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
     DIM_DESCRIPTIONS = {
-        "overview": "合约基础档案：品种、交易所、主力合约与乘数等参数，回答“交易的是什么”。",
-        "trend": "价格走势：结算价/收盘价区间涨跌幅、波动率、回撤与技术指标，判断趋势方向。",
-        "holding": "持仓分析：前20会员多空持仓排名或持仓量序列，判断机构多空倾向与资金进出。",
-        "mapping": "主力合约：当前成交量最大的具体合约及换月记录，理解主力连续合约如何拼接。",
-        "wsr": "仓单库存：注册仓单量变化，反映可交割量增减（增加偏空、减少偏多）。",
-        "settle": "结算参数：每日结算价与保证金相关，影响盈亏结算与资金占用。",
-        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+        "overview": "合约基础档案：品种、交易所、主力合约与乘数等参数。",
+        "trend": "价格走势：结算价/收盘价区间涨跌幅、波动率、回撤与技术指标读数。",
+        "holding": "持仓数据：前20会员多空持仓排名或持仓量序列。",
+        "mapping": "主力合约：当前成交量最大的具体合约及换月记录。",
+        "wsr": "仓单库存：注册仓单量变化（可交割量增减的统计读数）。",
+        "settle": "结算参数：每日结算价与保证金相关参数。",
+        "risk": "风险指标：列示可复核的风险指标读数，不做综合评级。",
     }
 
     def _fmt(self, x, digits=2):
@@ -502,7 +502,9 @@ class FutAnalysisRunner:
         name = self.fut_name or self.symbol
         _dts = self.results.get("trend")
         _ds = _dts.data.get("chart", {}).get("dates") if (_dts and _dts.is_ok() and _dts.data) else None
-        lines = [f"# {name} 全景研究报告", "", f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）", ""]
+        lines = [f"# {name} 全景研究报告", "",
+                 f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）", "",
+                 "> 合规说明：本报告仅展示 T-1 历史数据的统计结果，不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成投资建议或投资顾问服务；未经人工分析师审核，不得作为对外发布的证券研究报告使用。", ""]
         dim_order = [d for d in self.dimensions if d in self.results]
         risk_dim = "risk" if "risk" in dim_order else None
         ordered = [d for d in dim_order if d != "risk"]
@@ -540,11 +542,11 @@ class FutAnalysisRunner:
                         lines.append(f"- {n}")
             lines.append("")
         idx += 1
-        lines.append(f"## {idx}. 整体分析评价")
+        lines.append(f"## {idx}. 指标摘要")
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对期货价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
+        lines.append("*本报告由程序基于山西证券 Tushare 平台的 T-1 历史数据自动生成，仅作数据统计与展示：不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成任何投资建议、投资顾问服务或要约。报告未经人工分析师审核，不得作为对外发布的证券研究报告使用。*")
         return "\n".join(lines)
 
     def _render_dimension(self, res) -> list:
@@ -578,7 +580,7 @@ class FutAnalysisRunner:
             lines.append("")
             lines.append(self._md(pd.DataFrame(tech)))
             lines.append("")
-            lines.append("**分析评价**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI超买(>70)/超卖(<30)为短期状态指标。")
+            lines.append("**指标说明**：主力连续合约拼接各时期主力，换月跳空会影响技术指标的连续性。RSI 高于70/低于30为常见的技术状态读数。")
         elif res.title == "持仓分析":
             if res.status == ResultStatus.SUCCESS and data.get("holding_records"):
                 # 精选列并中文标注：原始行含 vol_chg/long_chg 等大量 NaN 字段，
@@ -590,26 +592,26 @@ class FutAnalysisRunner:
                           "空单持仓(手)": self._fmt(r.get("short_hld"))} for r in _hr[:10]]
                 lines.append(self._md(pd.DataFrame(_rows)))
                 lines.append("")
-                lines.append("**分析评价**：持仓排名反映多空主力结构，前20会员多空比可判断机构倾向。")
+                lines.append("**指标说明**：多空比为最新交易日多头持仓合计 / 空头持仓合计。")
             else:
                 oi = data.get("oi_series")
                 if oi:
                     lines.append(self._md(pd.DataFrame([{"trade_date": k, "持仓量(手)": int(v)} for k, v in oi.items()])))
                     lines.append("")
-                lines.append("**分析评价**：持仓量(oi)变化反映资金进出，与价格同向为趋势确认信号，背离时为常见的资金分歧信号。")
+                lines.append("**指标说明**：持仓量(oi)为未平仓合约数量。")
         elif res.title == "主力合约":
             ch = data.get("changes", [])
             if ch:
                 lines.append(self._md(pd.DataFrame(ch)))
                 lines.append("")
-            lines.append("**分析评价**：主力合约为当前成交量最大的具体合约，定期换月。基差(现货-期货)反映期现结构，正基差(现货>期货)偏多头，负基差偏空头，本数据源无现货价暂缺。")
+            lines.append("**指标说明**：主力合约为当前成交量最大的具体合约，定期换月。基差 = 现货价 − 期货价；本数据源无现货价，基差暂缺。")
         elif res.title == "仓单库存":
             ws = data.get("wsr_series", [])
             if ws:
                 _ws_df = pd.DataFrame(ws).rename(columns={"trade_date": "日期", "vol": "仓单量(张)"})
                 lines.append(self._md(_ws_df))
                 lines.append("")
-            lines.append(f"**分析评价**：仓单反映可交割量水平，{data.get('trend','')}。仓单增减为库存变动的统计口径，不含对价格方向的判断。")
+            lines.append(f"**指标说明**：注册仓单量{data.get('trend','')}。仓单为可交割库存的统计读数。")
         elif res.title == "结算参数":
             src = data.get("source", "")
             if src.startswith("fut_settle"):
@@ -629,7 +631,7 @@ class FutAnalysisRunner:
                         lines.append("")
                         lines.append(f"最新保证金率 {_mr*100:.0f}% → 名义杠杆约 {1/_mr:.1f} 倍（保证金交易，盈亏同步放大）。")
                     lines.append("")
-            lines.append("**分析评价**：结算价是每日无负债结算基准，影响保证金占用与盈亏。保证金率需交易所公告，连续合约暂以日线结算价近似。")
+            lines.append("**指标说明**：结算价为每日无负债结算的基准价；保证金率以交易所公告为准，连续合约暂以日线结算价近似。")
         return [l for l in lines if l is not None]
 
     def _overall_evaluation(self) -> str:
@@ -637,31 +639,8 @@ class FutAnalysisRunner:
         wsr = self.results.get("wsr")
         t_ok = trend and trend.is_ok() and trend.data
         w_ok = wsr and wsr.is_ok() and wsr.data
-        tags = []
-        if t_ok:
-            vol = self._f(trend.data.get("volatility")); mdd = self._f(trend.data.get("max_drawdown"))
-            r250 = self._f(trend.data.get("returns", {}).get("近250日涨幅%"))
-            rsi_v = self._f((trend.data.get("rsi") or {}).get("RSI"))
-            if vol and vol > 30:
-                tags.append("高波动")
-            if mdd and mdd < -25:
-                tags.append("回撤较深")
-            if r250 and r250 > 20:
-                tags.append("中期上行")
-            elif r250 and r250 < -10:
-                tags.append("中期下行")
-            if rsi_v and rsi_v > 70:
-                tags.append("短期超买")
-            elif rsi_v and rsi_v < 30:
-                tags.append("短期超卖")
-        if w_ok:
-            chg = wsr.data.get("chg")
-            if isinstance(chg, (int, float)) and chg < 0:
-                tags.append("仓单减少偏多")
-            elif isinstance(chg, (int, float)) and chg > 0:
-                tags.append("仓单增加偏空")
         name = self.fut_name or self.symbol
-        lines = [f"**综合判断**：{name}当前具备{'、'.join(tags) if tags else '中性'}特征。"]
+        lines = [f"**指标摘要**：{name} 各维度原始读数如下。"]
         pts = []
         if t_ok:
             ret = trend.data.get("returns", {})
@@ -684,11 +663,7 @@ class FutAnalysisRunner:
         pts.append(f"- **数据口径**：{_hd_txt}；基差需现货价（本数据源无现货接口）；结算参数取自当前主力具体合约")
         lines.extend(pts)
         lines.append("")
-        lines.append(f"**风格定位**：{name}属期货品种，受供需、季节性、宏观与政策等多因素影响，杠杆交易放大波动。")
-        r250 = self._f(trend.data.get("returns", {}).get("近250日涨幅%")) if t_ok else None
-        vol = self._f(trend.data.get("volatility")) if t_ok else None
-        concl = f"{name}{'波动较高' if vol and vol>30 else '波动适中'}，近250日涨跌幅 {r250 if r250 is not None else 'N/A'}%。以上均为 T-1 历史数据的统计描述，不含对期货品种方向性判断或操作建议。"
-        lines.append(f"**数据汇总**：{concl}")
+        lines.append("以上均为 T-1 历史数据的统计描述，不含估值意见、投资评级、目标价、买卖建议或收益预测。")
         return "\n".join(lines)
 
 

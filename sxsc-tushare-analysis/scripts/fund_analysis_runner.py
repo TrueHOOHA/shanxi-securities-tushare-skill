@@ -33,7 +33,6 @@ from basic_metrics import calc_max_drawdown, calc_returns, calc_sharpe, calc_vol
 from data_api import DataAPI, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
-from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 
 
 def _today() -> str:
@@ -699,16 +698,16 @@ class FundAnalysisRunner:
             qm = calc_quantitative_momentum(series, window=60)
 
         data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
-        conclusion = f"动量质量因子分析（数据源：{_src}）。"
+        conclusion = f"动量质量因子原始值（数据源：{_src}）。"
         insights = []
         if qm:
-            insights.append(f"高质量动量得分 {qm['momentum']}（raw_return {qm['raw_return']}, sigma {qm['sigma']}；数值越大=风险调整后动量越强）")
+            insights.append(f"高质量动量因子：{qm['momentum']}（60日收益 {qm['raw_return']}、"
+                            f"日收益标准差 {qm['sigma']}；计算式 = 60日收益 − 3000×日收益方差）")
         if am:
-            insights.append(f"振幅切割动量 A={am['a_factor']}（低振幅日ret加总，>0=动量正向）、B={am['b_factor']}（高振幅日，反转效应）")
+            insights.append(f"振幅切割因子：A={am['a_factor']}（低振幅日收益合计）、"
+                            f"B={am['b_factor']}（高振幅日收益合计）")
         else:
-            insights.append("场外基金无 OHLC，振幅切割动量不适用")
-        if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
-            insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
+            insights.append("场外基金无 OHLC，振幅切割因子不适用")
         return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
 
 
@@ -722,19 +721,19 @@ class FundAnalysisRunner:
         performance = self.results.get("performance")
         if performance and performance.is_ok() and performance.data:
             mdd = performance.data.get("max_drawdown")
-            if isinstance(mdd, (int, float)) and mdd < -25:
-                risks.append(f"最大回撤 {mdd}% 较深")
+            if isinstance(mdd, (int, float)):
+                risks.append(f"最大回撤 {mdd}%")
             vol = performance.data.get("volatility")
-            if isinstance(vol, (int, float)) and vol > 30:
-                risks.append(f"年化波动率 {vol}% 偏高")
+            if isinstance(vol, (int, float)):
+                risks.append(f"年化波动率 {vol}%")
 
         portfolio = self.results.get("portfolio")
         if portfolio and portfolio.is_ok() and portfolio.data:
             holdings = portfolio.data.get("holdings", [])
             if holdings:
                 top_ratio = holdings[0].get("ratio", 0)
-                if isinstance(top_ratio, (int, float)) and top_ratio > 10:
-                    risks.append(f"第一大重仓占比 {top_ratio:.2f}%，集中度较高")
+                if isinstance(top_ratio, (int, float)):
+                    risks.append(f"第一大重仓占比 {top_ratio:.2f}%")
 
         share = self.results.get("share")
         if share and share.is_ok() and share.data:
@@ -744,8 +743,7 @@ class FundAnalysisRunner:
                 last = changes[-1].get("fd_share")
                 if first and last and first > 0:
                     chg = (last / first - 1) * 100
-                    if chg < -20:
-                        risks.append(f"近4季份额缩水 {abs(chg):.2f}%，呈持续净赎回特征")
+                    risks.append(f"近4季份额变化 {chg:+.2f}%")
 
         if not risks:
             risks.append("未发现显著风险信号（基于已有维度）")
@@ -857,16 +855,16 @@ class FundAnalysisRunner:
 
     # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
     DIM_DESCRIPTIONS = {
-        "overview": "基金基础档案：代码、类型、成立与上市日期，回答“这是什么基金”。",
-        "nav": "净值走势：单位净值/复权净值的历史涨跌，反映基金长期收益趋势。",
-        "performance": "业绩指标：年化波动率、最大回撤、夏普比率，衡量风险调整后的收益质量。",
-        "peer": "同类对比：与同类型/同主题基金的收益排名，判断在同类中处于什么水平。",
-        "manager": "基金经理：现任管理人的任职年限，判断管理经验与稳定性。",
-        "portfolio": "持仓分析：前十大重仓股及占比，判断集中度与持仓结构。",
-        "share": "规模变化：近4季份额变化，反映资金净申购或赎回动向。",
-        "div": "分红：历史分红次数与累计金额，反映分红策略与持有体验。",
-        "momentum_quality": "动量质量：用风险调整后的动量得分，判断净值涨势是稳健驱动还是少数大波动堆出来的（低质量、持续性存疑）。",
-        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+        "overview": "基金基础档案：代码、类型、成立与上市日期。",
+        "nav": "净值走势：单位净值/复权净值的历史序列与区间收益读数。",
+        "performance": "业绩指标：年化波动率、最大回撤、夏普比率。",
+        "peer": "同类对比：与同类型/同主题基金的收益数值与击败百分比。",
+        "manager": "基金经理：现任管理人的任职起始与年限读数。",
+        "portfolio": "持仓分析：前十大重仓股及占比。",
+        "share": "份额变化：近4季份额与规模读数。",
+        "div": "分红：历史分红次数与累计金额。",
+        "momentum_quality": "动量质量：风险调整动量与振幅切割因子的原始数值（非评级）。",
+        "risk": "风险指标：列示可复核的风险指标读数，不做综合评级。",
     }
 
     def _overall_conclusion(self) -> str:
@@ -896,6 +894,8 @@ class FundAnalysisRunner:
             "",
             f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
+            "> 合规说明：本报告仅展示 T-1 历史数据的统计结果，不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成投资建议或投资顾问服务；未经人工分析师审核，不得作为对外发布的证券研究报告使用。",
+            "",
         ]
 
         dim_order = [d for d in self.dimensions if d in self.results]
@@ -917,7 +917,7 @@ class FundAnalysisRunner:
                 lines.extend(self._render_dimension(res))
                 if res.insights:
                     lines.append("")
-                    lines.append("**因子洞察**：")
+                    lines.append("**因子数值说明**：")
                     for _ins in res.insights:
                         lines.append(f"- {_ins}")
             elif res.note:
@@ -941,19 +941,19 @@ class FundAnalysisRunner:
                     for n in notes:
                         lines.append(f"- {n}")
             else:
-                lines.append(f"- {res.note or '未发现显著风险信号'}")
+                lines.append(f"- {res.note or '未列示额外风险指标'}")
             lines.append("")
 
         idx += 1
-        lines.append(f"## {idx}. 整体分析评价")
+        lines.append(f"## {idx}. 指标摘要")
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对基金净值走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
+        lines.append("*本报告由程序基于山西证券 Tushare 平台的 T-1 历史数据自动生成，仅作数据统计与展示：不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成任何投资建议、投资顾问服务或要约。报告未经人工分析师审核，不得作为对外发布的证券研究报告使用。*")
         return "\n".join(lines)
 
     def _overall_evaluation(self) -> str:
-        """跨维度整体分析评价。"""
+        """跨维度指标摘要：只汇总原始读数，不做综合评级或风格定位。"""
         nav = self.results.get("nav")
         perf = self.results.get("performance")
         port = self.results.get("portfolio")
@@ -965,30 +965,7 @@ class FundAnalysisRunner:
         perf_ok = perf and perf.is_ok() and perf.data
         port_ok = port and port.is_ok() and port.data
 
-        lines = []
-        name = self.fund_name or self.ts_code
-
-        # 综合判断
-        tags = []
-        if perf_ok:
-            vol = self._f(self._v(perf.data, "volatility"))
-            mdd = self._f(self._v(perf.data, "max_drawdown"))
-            if vol is not None and vol > 25:
-                tags.append("高波动")
-            elif vol is not None and vol < 15:
-                tags.append("低波动")
-            if mdd is not None and mdd < -20:
-                tags.append("回撤较深")
-        if nav_ok:
-            ret250 = self._f(self._v(nav.data, "returns", "近250日涨幅%"))
-            if ret250 is not None and ret250 > 15:
-                tags.append("强势")
-            elif ret250 is not None and ret250 < -10:
-                tags.append("弱势")
-        if tags:
-            lines.append(f"**综合判断**：{name}当前具备{'、'.join(tags[:4])}特征。")
-        else:
-            lines.append(f"**综合判断**：{name}当前各项指标相对中性。")
+        lines = [f"**指标摘要**：{self.fund_name or self.ts_code} 各维度原始读数如下。"]
 
         # 分维度要点
         points = []
@@ -1033,79 +1010,12 @@ class FundAnalysisRunner:
             lines.append("")
             lines.extend(points)
 
-        # 风格定位
-        style_parts = []
-        if perf_ok:
-            vol = self._f(self._v(perf.data, "volatility"))
-            if vol is not None and vol < 15:
-                style_parts.append("低波动/稳健型")
-            elif vol is not None and vol > 25:
-                style_parts.append("高波动/进取型")
-        if self.fund_type:
-            if "股票" in str(self.fund_type):
-                style_parts.append("股票型")
-            elif "债券" in str(self.fund_type):
-                style_parts.append("债券型")
-
-        if style_parts:
-            lines.append("")
-            lines.append(f"**风格定位**：{name}属于{'/'.join(style_parts)}基金。")
-
-        # 结论
-        concl_parts = []
-        if perf_ok:
-            mdd = self._f(self._v(perf.data, "max_drawdown"))
-            if mdd is not None and mdd < -20:
-                concl_parts.append(f"最大回撤 {mdd:.1f}%较深")
-        if share and share.is_ok() and share.data:
-            changes = share.data.get("quarterly_changes", [])
-            if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
-                chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
-                if chg < -20:
-                    concl_parts.append(f"份额缩水 {abs(chg):.1f}%（持续净赎回）")
-
-        if concl_parts:
-            lines.append("")
-            lines.append(f"**数据汇总**：{name}{'，'.join(concl_parts)}。以上均为 T-1 历史数据的统计描述，不含对基金方向性判断或操作建议。")
-        else:
-            lines.append("")
-            lines.append(f"**数据汇总**：{name}当前各项指标平稳，未现显著风险信号。以上均为 T-1 历史数据的统计描述，不含对基金方向性判断或操作建议。")
-
-        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
-        try:
-            ret250 = self._f(self._v(nav.data, "returns", "近250日涨幅%")) if nav_ok else None
-            sharpe = self._f(self._v(perf.data, "sharpe")) if perf_ok else None
-            # 基金无 PE/F-Score，估值与质量维跳过
-            composite = calc_composite_score(None, None, ret250, sharpe, None)
-            if composite.get("composite") is not None:
-                lines.append("")
-                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
-                fac = composite.get("factors", {})
-                if fac:
-                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
-
-            positioning = calc_factor_positioning(None, None, ret250)
-            if positioning.get("positioning"):
-                lines.append("")
-                lines.append(f"**因子定位**：{positioning['positioning']}")
-
-            if perf_ok:
-                mdd = self._f(self._v(perf.data, "max_drawdown"))
-                vol = self._f(self._v(perf.data, "volatility"))
-                budget = calc_risk_budget(None, mdd, None, None, vol)
-                if budget.get("risk_level"):
-                    lines.append("")
-                    # 合规：只列风险因子的客观测算值与定性等级，不给出仓位/配置比例
-                    lines.append(f"**风险因子测度**：风险等级 {budget['risk_level']}（由回撤/波动/流动性等因子综合测算，为数据统计结果，不含仓位或配置建议）")
-                    for r in budget.get("reasons", []):
-                        lines.append(f"- {r}")
-        except Exception:
-            pass
-
-        return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
+        lines.append("")
+        lines.append("以上均为 T-1 历史数据的统计描述，不含估值意见、投资评级、目标价、买卖建议或收益预测。")
+        return "\n".join(lines)
 
     def _render_dimension(self, res) -> list:
-        """渲染单个维度的数据表 + 分析评价。"""
+        """渲染单个维度的数据表 + 指标说明。"""
         lines = []
         data = res.data or {}
 
@@ -1151,8 +1061,11 @@ class FundAnalysisRunner:
                     lines.append(f"\n**ETF 折溢价**：{_pd_pct:+.2f}%（{_pd_txt}，收盘价相对单位净值；折溢价即二级市场价格相对净值的偏离幅度）")
                 if ec.get("tracking_error_ann_pct") is not None:
                     _te = ec["tracking_error_ann_pct"]
-                    lines.append(f"**跟踪误差**：年化 {_te:.2f}%（基准 {ec.get('benchmark_code')}）；宽基 ETF 年化跟踪误差通常 <1%，偏高时检查费用、抽样复制或现金拖累")
-            lines.append(f"**分析评价**：最新净值 {self._fmt(data.get('latest_nav'))}，近20日 {self._fmt(returns.get('近20日涨幅%'))}%，近250日 {self._fmt(returns.get('近250日涨幅%'))}%。净值走势反映基金长期趋势，波动率与最大回撤刻画其风险特征。")
+                    lines.append(f"**跟踪误差**：年化 {_te:.2f}%（基准 {ec.get('benchmark_code')}）；"
+                                 f"该指标为 ETF 日收益与基准日收益差值的年化标准差。")
+            lines.append(f"**指标说明**：最新净值 {self._fmt(data.get('latest_nav'))}，"
+                         f"近20日 {self._fmt(returns.get('近20日涨幅%'))}%，"
+                         f"近250日 {self._fmt(returns.get('近250日涨幅%'))}%。")
 
         elif res.title == "业绩指标":
             table = {
@@ -1166,12 +1079,12 @@ class FundAnalysisRunner:
             sharpe = self._f(data.get("sharpe"))
             parts = []
             if vol is not None:
-                parts.append(f"年化波动 {vol}%，" + ("偏高" if vol > 25 else "适中" if vol > 15 else "较低"))
+                parts.append(f"年化波动 {vol}%")
             if mdd is not None:
-                parts.append(f"最大回撤 {mdd}%，" + ("较深" if mdd < -20 else "可控"))
+                parts.append(f"最大回撤 {mdd}%")
             if sharpe is not None:
-                parts.append(f"夏普 {sharpe}，" + ("风险调整收益较好" if sharpe > 1 else "风险调整收益一般" if sharpe > 0 else "风险调整收益较差"))
-            lines.append(f"**分析评价**：{'，'.join(parts)}。")
+                parts.append(f"夏普 {sharpe}")
+            lines.append(f"**指标说明**：{'，'.join(parts)}。")
 
         elif res.title == "同类对比":
             own = data.get("own") or {}
@@ -1187,18 +1100,8 @@ class FundAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(_clean).rename(columns={"ts_code": "基金代码"})))
             rank = own.get("近20日%排名%", "N/A")
             lines.append("")
-            # 排名口径：{col}排名% 是"击败百分比"（收益高于本基金的同类占比），
-            # 越大越好——旧实现用 <33 判"前1/3"，方向反了（+25% 收益被判"后1/3"）
-            _rk = self._f(rank)
-            if _rk is None:
-                _pos = "同类排名数据不足"
-            elif _rk > 67:
-                _pos = "处于同类前1/3"
-            elif _rk < 33:
-                _pos = "处于同类后1/3"
-            else:
-                _pos = "处于同类中游"
-            lines.append(f"**分析评价**：本基金近20日收益优于约 {self._fmt(rank)}% 的同类（{_pos}）。")
+            # {col}排名% 是"击败百分比"（收益高于本基金的同类占比），只陈述数值，不做分档评价
+            lines.append(f"**指标说明**：本基金近20日收益高于约 {self._fmt(rank)}% 的同类基金。")
 
         elif res.title == "基金经理":
             rows = [
@@ -1213,7 +1116,7 @@ class FundAnalysisRunner:
             tenure = self._f(data.get("tenure_days"))
             if tenure is not None:
                 years = int(tenure) // 365
-                lines.append(f"**分析评价**：基金经理任职约 {years} 年，" + ("管理经验丰富" if years >= 5 else "管理经验尚浅" if years < 2 else "具备一定管理经验") + "。")
+                lines.append(f"**指标说明**：基金经理任职约 {years} 年。")
 
         elif res.title == "持仓分析":
             holdings = data.get("holdings", [])
@@ -1222,7 +1125,7 @@ class FundAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(h_rows)))
             total = self._fmt(data.get("top10_total_ratio"))
             lines.append("")
-            lines.append(f"**分析评价**：前十大重仓占比合计 {total}%，" + ("集中度较高" if self._f(data.get("top10_total_ratio")) and self._f(data.get("top10_total_ratio")) > 50 else "集中度适中") + "。")
+            lines.append(f"**指标说明**：前十大重仓占比合计 {total}%。")
 
         elif res.title == "规模变化":
             changes = data.get("quarterly_changes", [])
@@ -1245,7 +1148,9 @@ class FundAnalysisRunner:
                 lines.append(f"最新规模（份额×单位净值）约 {self._fmt(data.get('latest_scale_yi'))} 亿元。")
             if len(changes) >= 2 and changes[0].get("fd_share") and changes[-1].get("fd_share"):
                 chg = round((changes[-1]["fd_share"] / changes[0]["fd_share"] - 1) * 100, 2)
-                lines.append(f"**分析评价**：近4季份额变化 {chg:+.2f}%{split_note}，" + ("存在赎回压力" if chg < -10 else "规模相对稳定" if abs(chg) < 10 else "资金持续流入") + "。份额为该基金单只口径（同标的场内外其他基金不合并），规模为份额×单位净值的近似值。")
+                lines.append(f"**指标说明**：近4季份额变化 {chg:+.2f}%{split_note}。"
+                             f"份额为该基金单只口径（同标的场内外其他基金不合并），"
+                             f"规模为份额×单位净值的近似值。")
 
         elif res.title == "分红":
             rows = [
@@ -1258,7 +1163,8 @@ class FundAnalysisRunner:
                 lines.append(f"最近一次除息日：{data['latest'].get('ex_date', 'N/A')}，每份派息 {self._fmt(data['latest'].get('div_cash'))} 元")
             lines.append("")
             _n = data.get("count", 0)
-            lines.append(f"**分析评价**：成立以来累计分红 {_n} 次、合计 {self._fmt(data.get('total_div_cash'))} 元/份" + ("，分红政策稳定（累计口径，非当期收益承诺）" if _n > 10 else "，分红次数较少") + "。")
+            lines.append(f"**指标说明**：成立以来累计分红 {_n} 次、"
+                         f"合计 {self._fmt(data.get('total_div_cash'))} 元/份（累计口径，非当期收益承诺）。")
 
         elif res.title == "风险提示":
             for r in data.get("risks", []):

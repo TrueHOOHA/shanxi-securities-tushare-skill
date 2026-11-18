@@ -30,7 +30,6 @@ from data_api import DataAPI, shift_date
 from factor_signals import calc_amplitude_momentum, calc_quantitative_momentum
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
-from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 
 
 # index_weight 是月度数据且被"成分权重""行业分布"两个维度并行消费；
@@ -566,16 +565,16 @@ class IndexAnalysisRunner:
         qm = calc_quantitative_momentum(price, window=60)
         am = calc_amplitude_momentum(price, high, low, n=120, lam=0.3) if has_ohlc else None
         data = {"quantitative_momentum": qm, "amplitude_momentum": am, "source": _src}
-        conclusion = f"动量质量因子分析（数据源：{_src}）。"
+        conclusion = f"动量质量因子原始值（数据源：{_src}）。"
         insights = []
         if qm:
-            insights.append(f"高质量动量得分 {qm['momentum']}（60日收益 {qm['raw_return'] * 100:.2f}%、日波动 {qm['sigma'] * 100:.2f}%；得分 = 收益 − 3000×方差，越大动量越强且质量越高）")
+            insights.append(f"高质量动量因子：{qm['momentum']}（60日收益 {qm['raw_return'] * 100:.2f}%、"
+                            f"日收益标准差 {qm['sigma'] * 100:.2f}%；计算式 = 60日收益 − 3000×日收益方差）")
         if am:
-            insights.append(f"振幅切割动量：A={am['a_factor']}（低振幅日收益合计，>0 动量正向）、B={am['b_factor']}（高振幅日收益合计，呈反转效应）")
+            insights.append(f"振幅切割因子：A={am['a_factor']}（低振幅日收益合计）、"
+                            f"B={am['b_factor']}（高振幅日收益合计）")
         elif not has_ohlc:
-            insights.append("行情缺 high/low 列，振幅切割动量不适用")
-        if qm and qm.get("momentum") is not None and qm["momentum"] < 0:
-            insights.append("高质量动量得分为负，动量或由单日大波动驱动，持续性存疑")
+            insights.append("行情缺 high/low 列，振幅切割因子不适用")
         return DimensionResult.success("动量质量", conclusion=conclusion, data=data, insights=insights)
 
 
@@ -590,19 +589,19 @@ class IndexAnalysisRunner:
         if trend and trend.is_ok() and trend.data:
             vol = trend.data.get("volatility")
             mdd = trend.data.get("max_drawdown")
-            if isinstance(vol, (int, float)) and vol > 30:
-                risks.append(f"指数年化波动 {vol}% 偏高")
-            if isinstance(mdd, (int, float)) and mdd < -25:
-                risks.append(f"指数近一年最大回撤 {mdd}% 较深")
+            if isinstance(vol, (int, float)):
+                risks.append(f"指数年化波动 {vol}%")
+            if isinstance(mdd, (int, float)):
+                risks.append(f"指数近一年最大回撤 {mdd}%")
 
         valuation = self.results.get("valuation")
         if valuation and valuation.is_ok() and valuation.data:
             pe_hist = valuation.data.get("pe_hist_percentile")
             pb_hist = valuation.data.get("pb_hist_percentile")
-            if isinstance(pe_hist, (int, float)) and pe_hist > 70:
-                risks.append(f"PE 历史分位 {pe_hist}%，估值偏高")
-            if isinstance(pb_hist, (int, float)) and pb_hist > 70:
-                risks.append(f"PB 历史分位 {pb_hist}%，估值偏高")
+            if isinstance(pe_hist, (int, float)):
+                risks.append(f"PE 历史分位 {pe_hist}%")
+            if isinstance(pb_hist, (int, float)):
+                risks.append(f"PB 历史分位 {pb_hist}%")
 
         if not risks:
             risks.append("未发现显著风险信号（基于已有维度）")
@@ -718,15 +717,15 @@ class IndexAnalysisRunner:
 
     # 各维度含义描述（面向非专业读者，标题后以引用块呈现）
     DIM_DESCRIPTIONS = {
-        "overview": "指数基础档案：代码、发布机构、基期与基点，回答“这是什么指数”。",
-        "trend": "指数走势：区间涨跌幅、波动率、回撤与均线，并与沪深300对比，判断趋势方向与相对强弱。",
-        "valuation": "估值水平：指数整体 PE/PB 及历史分位，判断“贵不贵”。",
-        "weight": "成分权重：前十大成分股及占比，判断指数受哪些大票主导。",
-        "sector": "行业分布：成分股按申万行业归类，判断指数的行业集中度。",
-        "global": "国际对比：与标普500/纳斯达克/恒生等指数的收益对比，判断相对国际市场的强弱。",
-        "margin": "两融/市场杠杆：全市场融资融券余额，判断整体市场杠杆情绪与风险偏好。",
-        "momentum_quality": "动量质量：用风险调整后的动量得分，判断指数涨势的稳健程度与持续性。",
-        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+        "overview": "指数基础档案：代码、发布机构、基期与基点。",
+        "trend": "指数走势：区间涨跌幅、波动率、回撤、均线与沪深300对比的读数。",
+        "valuation": "估值指标：指数整体 PE/PB 及历史分位。",
+        "weight": "成分权重：前十大成分股及权重占比。",
+        "sector": "行业分布：成分股按申万行业归类的家数与权重占比。",
+        "global": "国际对比：与标普500/纳斯达克/恒生等指数的收益与位次对比。",
+        "margin": "两融数据：全市场融资融券余额读数。",
+        "momentum_quality": "动量质量：风险调整动量与振幅切割因子的原始数值。",
+        "risk": "风险指标：列示可复核的风险指标读数，不做综合评级。",
     }
 
     def _overall_conclusion(self) -> str:
@@ -763,6 +762,8 @@ class IndexAnalysisRunner:
             "",
             f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
+            "> 合规说明：本报告仅展示 T-1 历史数据的统计结果，不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成投资建议或投资顾问服务；未经人工分析师审核，不得作为对外发布的证券研究报告使用。",
+            "",
         ]
 
         dim_order = [d for d in self.dimensions if d in self.results]
@@ -784,7 +785,7 @@ class IndexAnalysisRunner:
                 lines.extend(self._render_dimension(res))
                 if res.insights:
                     lines.append("")
-                    lines.append("**因子洞察**：")
+                    lines.append("**因子数值说明**：")
                     for _ins in res.insights:
                         lines.append(f"- {_ins}")
             elif res.note:
@@ -808,24 +809,24 @@ class IndexAnalysisRunner:
                     for n in notes:
                         lines.append(f"- {n}")
             else:
-                lines.append(f"- {res.note or '未发现显著风险信号'}")
+                lines.append(f"- {res.note or '未列示额外风险指标'}")
             lines.append("")
 
         idx += 1
-        lines.append(f"## {idx}. 整体分析评价")
+        lines.append(f"## {idx}. 指标摘要")
         try:
             lines.append(self._overall_evaluation())
         except Exception as e:
-            # 整体评价是装饰性汇总，任何异常都不该让整份报告崩溃（SKILL 部分失败原则）
-            print(f"[index_runner] 整体分析评价生成失败: {type(e).__name__}: {e}", file=sys.stderr)
-            lines.append("**整体分析评价**：部分维度数据不完整，本次未生成综合结论。")
+            # 指标摘要是装饰性汇总，任何异常都不该让整份报告崩溃（SKILL 部分失败原则）
+            print(f"[index_runner] 指标摘要生成失败: {type(e).__name__}: {e}", file=sys.stderr)
+            lines.append("**指标摘要**：部分维度数据不完整，本次未生成汇总。")
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对证券价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
+        lines.append("*本报告由程序基于山西证券 Tushare 平台的 T-1 历史数据自动生成，仅作数据统计与展示：不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成任何投资建议、投资顾问服务或要约。报告未经人工分析师审核，不得作为对外发布的证券研究报告使用。*")
         return "\n".join(lines)
 
     def _overall_evaluation(self) -> str:
-        """跨维度整体分析评价。"""
+        """跨维度指标摘要：只汇总原始读数，不做综合评级或风格定位。"""
         trend = self.results.get("trend")
         valuation = self.results.get("valuation")
         weight = self.results.get("weight")
@@ -835,34 +836,7 @@ class IndexAnalysisRunner:
         val_ok = valuation and valuation.is_ok() and valuation.data
         wt_ok = weight and weight.is_ok() and weight.data
 
-        lines = []
-        name = self.index_name or self.ts_code
-
-        # 综合判断
-        tags = []
-        if val_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            pb_hist = self._f(self._v(valuation.data, "pb_hist_percentile"))
-            if pe_hist is not None and pe_hist > 70:
-                tags.append("估值偏高")
-            elif pe_hist is not None and pe_hist < 20:
-                tags.append("估值偏低")
-        if trend_ok:
-            vol = self._f(self._v(trend.data, "volatility"))
-            if vol is not None and vol > 30:
-                tags.append("高波动")
-            elif vol is not None and vol < 15:
-                tags.append("低波动")
-            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%"))
-            if ret250 is not None and ret250 > 20:
-                tags.append("强势")
-            elif ret250 is not None and ret250 < -10:
-                tags.append("弱势")
-
-        if tags:
-            lines.append(f"**综合判断**：{name}当前具备{'、'.join(tags[:4])}特征。")
-        else:
-            lines.append(f"**综合判断**：{name}当前各项指标相对中性。")
+        lines = [f"**指标摘要**：{self.index_name or self.ts_code} 各维度原始读数如下。"]
 
         # 分维度要点
         points = []
@@ -903,94 +877,12 @@ class IndexAnalysisRunner:
             lines.append("")
             lines.extend(points)
 
-        # 风格定位
-        style_parts = []
-        if val_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            if pe_hist is not None and pe_hist > 70:
-                style_parts.append("高估值")
-            elif pe_hist is not None and pe_hist < 20:
-                style_parts.append("低估值")
-        if trend_ok:
-            vol = self._f(self._v(trend.data, "volatility"))
-            bench_vol = self._f(self._v(trend.data.get("benchmark") or {}, "volatility"))
-            if vol is not None and vol > 30:
-                style_parts.append("高波动/成长型")
-            elif vol is not None and vol < 15:
-                style_parts.append("低波动/稳健型")
-            # 用「指数波动率 / 基准波动率」衡量相对弹性（Beta 需回归，指数维度未计算）。
-            # 旧实现用 250 日收益之比：基准收益为负时比值变号，会把跑赢基准的指数
-            # 错判成"防御型"。
-            if vol is not None and bench_vol is not None and bench_vol > 0:
-                _vr = vol / bench_vol
-                if _vr > 1.2:
-                    style_parts.append("高弹性")
-                elif _vr < 0.8:
-                    style_parts.append("防御型")
-
-        if style_parts:
-            lines.append("")
-            _st = "/".join(style_parts)
-            _st = _st[:-1] if _st.endswith("型") else _st
-            lines.append(f"**风格定位**：{name}属于{_st}型指数。")
-
-        # 结论
-        concl_parts = []
-        if val_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            if pe_hist is not None:
-                concl_parts.append(f"PE 处于历史分位 {pe_hist}%")
-        if trend_ok:
-            vol = self._f(self._v(trend.data, "volatility"))
-            mdd = self._f(self._v(trend.data, "max_drawdown"))
-            if vol is not None and vol > 30:
-                concl_parts.append(f"年化波动 {vol:.1f}%偏高")
-            if mdd is not None and mdd < -20:
-                concl_parts.append(f"最大回撤 {mdd:.1f}%较深")
-
-        if concl_parts:
-            lines.append("")
-            lines.append(f"**数据汇总**：{name}{'，'.join(concl_parts)}。以上均为 T-1 历史数据的统计描述，不含对指数方向性判断或操作建议。")
-        else:
-            lines.append("")
-            lines.append(f"**数据汇总**：{name}当前各项指标相对中性。以上均为 T-1 历史数据的统计描述，不含对指数方向性判断或操作建议。")
-
-        # ---- 因子综合评分 + 三维定位 + 风险预算 ----
-        try:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile")) if val_ok else None
-            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%")) if trend_ok else None
-            sharpe = self._f(self._v(trend.data, "sharpe")) if trend_ok else None
-
-            composite = calc_composite_score(pe_hist, None, ret250, sharpe, None)
-            if composite.get("composite") is not None:
-                lines.append("")
-                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
-                fac = composite.get("factors", {})
-                if fac:
-                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
-
-            positioning = calc_factor_positioning(pe_hist, None, ret250)
-            if positioning.get("positioning"):
-                lines.append("")
-                lines.append(f"**因子定位**：{positioning['positioning']}")
-
-            if trend_ok:
-                mdd = self._f(self._v(trend.data, "max_drawdown"))
-                vol = self._f(self._v(trend.data, "volatility"))
-                budget = calc_risk_budget(None, mdd, None, None, vol)
-                if budget.get("risk_level"):
-                    lines.append("")
-                    # 合规：只列风险因子的客观测算值与定性等级，不给出仓位/配置比例
-                    lines.append(f"**风险因子测度**：风险等级 {budget['risk_level']}（由回撤/波动/Beta/流动性/VaR 等因子综合测算，为数据统计结果，不含仓位或配置建议）")
-                    for r in budget.get("reasons", []):
-                        lines.append(f"- {r}")
-        except Exception:
-            pass
-
-        return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
+        lines.append("")
+        lines.append("以上均为 T-1 历史数据的统计描述，不含估值意见、投资评级、目标价、买卖建议或收益预测。")
+        return "\n".join(lines)
 
     def _render_dimension(self, res) -> list:
-        """渲染单个维度的数据表 + 分析评价。"""
+        """渲染单个维度的数据表 + 指标说明。"""
         lines = []
         data = res.data or {}
 
@@ -1050,7 +942,7 @@ class IndexAnalysisRunner:
                 ma_rows = [{"均线": k, "数值": self._fmt(v)} for k, v in ma.items()]
                 lines.append(self._md(pd.DataFrame(ma_rows)))
 
-            # 分析评价
+            # 指标说明
             lines.append("")
             lines.append(self._trend_eval(data))
 
@@ -1081,7 +973,7 @@ class IndexAnalysisRunner:
             top1_code = weights[0].get("con_code", "N/A") if weights else "N/A"
             top1_w = self._fmt(weights[0].get("weight")) if weights else "N/A"
             top1_desc = f"第一大权重{top1_name}（{top1_code}，{top1_w}%）" if top1_name else f"第一大权重{top1_code}（{top1_w}%）"
-            lines.append(f"**分析评价**：前十大成分股权重合计 {total}%，" + ("集中度较高" if self._f(data.get("top10_total_weight")) and self._f(data.get("top10_total_weight")) > 50 else "集中度适中") + f"。{top1_desc}对指数走势影响显著。")
+            lines.append(f"**指标说明**：前十大成分股权重合计 {total}%。{top1_desc}。")
 
         elif res.title == "行业分布":
             dist = data.get("distribution", [])
@@ -1093,10 +985,10 @@ class IndexAnalysisRunner:
                 top1_cnt = dist[0].get("家数占比%", "N/A")
                 top1_w = dist[0].get("权重占比%", "N/A")
                 _wd_txt = f"（家数占比 {top1_cnt}%，权重占比 {top1_w}%）" if top1_w != "N/A" else f"（家数占比 {top1_cnt}%）"
-                _conc_basis = self._f(top1_w) if top1_w != "N/A" else self._f(top1_cnt)
                 # 分类口径必须在报告中标注（申万2021 / Tushare回退）
                 _src = data.get("industry_source") or "分类口径未标注"
-                lines.append(f"**分析评价**：按{_src}分类，前三大行业为{'、'.join(top3)}，第一大行业（{top1_name}）{_wd_txt}。" + ("权重口径集中度较高，指数走势受少数行业影响显著。" if _conc_basis is not None and _conc_basis > 20 else "权重口径下行业分布相对分散。"))
+                lines.append(f"**指标说明**：按{_src}分类，前三大行业为{'、'.join(top3)}，"
+                             f"第一大行业（{top1_name}）{_wd_txt}。")
             else:
                 lines.append("- 无法获取指数成分股")
 
@@ -1105,7 +997,7 @@ class IndexAnalysisRunner:
             if comp:
                 lines.append(self._md(pd.DataFrame(comp)))
                 lines.append("")
-                # 找出近250日表现最好和最差的
+                # 按近250日涨幅列出本指数在对比样本中的位次（只陈述数值与排名）
                 eval_parts = []
                 for c in comp:
                     name = c.get("标的", "")
@@ -1114,19 +1006,12 @@ class IndexAnalysisRunner:
                         eval_parts.append((name, r250))
                 if eval_parts:
                     eval_parts.sort(key=lambda x: x[1], reverse=True)
-                    best = eval_parts[0]
-                    worst = eval_parts[-1]
                     idx_name = self.index_name or self.ts_code
                     idx_entry = next((x for x in eval_parts if x[0] == idx_name), None)
                     if idx_entry:
-                        eval_text = ""
-                        if idx_entry[1] == best[1]:
-                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标的中表现最强。"
-                        elif idx_entry[1] == worst[1]:
-                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，在对比标的中表现最弱。"
-                        else:
-                            eval_text = f"{idx_name}近250日涨幅 {idx_entry[1]}%，介于{best[0]}({best[1]}%)与{worst[0]}({worst[1]}%)之间，较最强标的落后 {round(best[1] - idx_entry[1], 1)} 个百分点，处于对比样本第 {len(eval_parts) - [x[0] for x in eval_parts].index(idx_name)}/{len(eval_parts)} 位。"
-                        lines.append(f"**分析评价**：{eval_text}")
+                        _rank = [x[0] for x in eval_parts].index(idx_name) + 1
+                        lines.append(f"**指标说明**：{idx_name}近250日涨幅 {idx_entry[1]}%，"
+                                     f"在 {len(eval_parts)} 个对比标的中列第 {_rank} 位。")
             else:
                 lines.append("- 未配置该指数的国际对比标的")
 
@@ -1175,79 +1060,38 @@ class IndexAnalysisRunner:
         return [l for l in lines if l is not None]
 
     def _trend_eval(self, data):
-        returns = data.get("returns", {})
-        ret20 = self._fmt(returns.get("近20日涨幅%"))
-        ret250 = self._fmt(returns.get("近250日涨幅%"))
-        vol = self._fmt(data.get("volatility"))
-        mdd = self._fmt(data.get("max_drawdown"))
+        parts = [f"近20日 {self._fmt(data.get('returns', {}).get('近20日涨幅%'))}%，"
+                 f"近250日 {self._fmt(data.get('returns', {}).get('近250日涨幅%'))}%，"
+                 f"年化波动 {self._fmt(data.get('volatility'))}%，"
+                 f"最大回撤 {self._fmt(data.get('max_drawdown'))}%。"]
         ma = data.get("ma", {})
-        ma_sig = ""
         if ma:
-            ma5 = self._f(ma.get("MA5"))
-            ma20 = self._f(ma.get("MA20"))
-            ma60 = self._f(ma.get("MA60"))
-            if ma5 and ma20 and ma60:
-                if ma5 > ma20 > ma60:
-                    ma_sig = "多头排列"
-                elif ma5 < ma20 < ma60:
-                    ma_sig = "空头排列"
-                else:
-                    ma_sig = "交织"
-        parts = [f"近20日 {ret20}%，近250日 {ret250}%，年化波动 {vol}%，最大回撤 {mdd}%。"]
-        if ma_sig:
-            parts.append(f"均线{ma_sig}。")
+            parts.append(f"均线：MA5={self._fmt(ma.get('MA5'))}，"
+                         f"MA20={self._fmt(ma.get('MA20'))}，MA60={self._fmt(ma.get('MA60'))}。")
         bench = data.get("benchmark") or {}
         if bench:
-            bench250 = self._fmt(self._v(bench, "returns", "近250日涨幅%"))
-            ret250_f = self._f(ret250)
-            bench250_f = self._f(bench250)
-            if ret250_f is not None and bench250_f is not None:
-                parts.append(f"近250日相对沪深300 {ret250}% vs {bench250}%，{'跑赢' if ret250_f > bench250_f else '跑输'}基准。")
-        return "**分析评价**：" + "".join(parts)
+            bench250 = self._v(bench, "returns", "近250日涨幅%")
+            parts.append(f"近250日相对沪深300 {self._fmt(data.get('returns', {}).get('近250日涨幅%'))}% "
+                         f"vs {self._fmt(bench250)}%。")
+        return "**指标说明**：" + "".join(parts)
 
     def _valuation_eval(self, data):
-        pe = self._f(data.get("pe"))
-        pe_hist = self._f(data.get("pe_hist_percentile"))
-        pb_hist = self._f(data.get("pb_hist_percentile"))
         parts = []
-        if pe_hist is not None:
-            if pe_hist > 80:
-                parts.append(f"PE历史分位 {pe_hist}%，估值偏高。")
-            elif pe_hist > 70:
-                parts.append(f"PE历史分位 {pe_hist}%，估值中高（进一步抬升依赖盈利增速）。")
-            elif pe_hist < 20:
-                parts.append(f"PE历史分位 {pe_hist}%，处于历史低位。")
-                if pe is not None and pe > 30:
-                    parts.append(f"PE绝对值 {pe} 虽不低，但相对自身历史已处于底部区间，反映成分股盈利改善快于股价上涨。")
-            else:
-                parts.append(f"PE历史分位 {pe_hist}%，估值中等。")
-        if pb_hist is not None:
-            if pb_hist > 80:
-                parts.append(f"PB历史分位 {pb_hist}%，偏高。")
-            elif pb_hist > 70:
-                parts.append(f"PB历史分位 {pb_hist}%，中高。")
-            elif pb_hist < 20:
-                parts.append(f"PB历史分位 {pb_hist}%，偏低。")
-            else:
-                parts.append(f"PB历史分位 {pb_hist}%。")
-        parts.append("指数估值水位与成分股盈利增速、行业景气度相关。")
-        return "**分析评价**：" + "".join(parts)
+        if data.get("pe_hist_percentile") is not None:
+            parts.append(f"PE 历史分位 {self._fmt(data.get('pe_hist_percentile'))}%。")
+        if data.get("pb_hist_percentile") is not None:
+            parts.append(f"PB 历史分位 {self._fmt(data.get('pb_hist_percentile'))}%。")
+        parts.append("历史分位为当前值在样本区间内的百分位读数。")
+        return "**指标说明**：" + "".join(parts)
 
     def _margin_eval(self, data):
-        total_rzye = self._f(data.get("total_rzye_billion"))
-        avg_chg = self._f(data.get("avg_rzye_chg_pct"))
         parts = []
-        if total_rzye is not None:
-            parts.append(f"两市融资余额合计 {total_rzye:.0f}亿，")
-        if avg_chg is not None:
-            if avg_chg > 5:
-                parts.append(f"近一年上升 {avg_chg}%，杠杆资金快速入场，市场风险偏好升温。")
-            elif avg_chg < -5:
-                parts.append(f"近一年下降 {abs(avg_chg)}%，杠杆资金持续撤离，市场风险偏好降温，反映资金面偏谨慎。")
-            else:
-                parts.append(f"近一年变化 {avg_chg}%，杠杆情绪相对平稳，市场风险偏好未出现明显转向。")
-        parts.append("两融余额是市场整体杠杆水平的晴雨表，融资余额上升通常对应风险偏好提升，下降则反映去杠杆压力。")
-        return "**分析评价**：" + "".join(parts)
+        if data.get("total_rzye_billion") is not None:
+            parts.append(f"两市融资余额合计 {self._fmt(data.get('total_rzye_billion'))}亿。")
+        if data.get("avg_rzye_chg_pct") is not None:
+            parts.append(f"两所融资余额区间变化 {self._fmt(data.get('avg_rzye_chg_pct'))}%。")
+        parts.append("两融余额为市场杠杆水平的统计读数。")
+        return "**指标说明**：" + "".join(parts)
 
 # ---------- 便捷函数 ----------
 

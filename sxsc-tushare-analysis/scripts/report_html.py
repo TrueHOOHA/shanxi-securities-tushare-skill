@@ -712,11 +712,6 @@ def render_html_report(md_text: str, results) -> str:
             f'<div id="chart-{i}" class="chart"></div>' for i in leftover))
 
     body_html = "\n".join(parts)
-    # 风险等级徽标：高=红 中=橙 低=绿
-    def _badge(m):
-        color = {"高": "#d0342c", "中": "#d97706", "低": "#16a34a"}[m.group(2)]
-        return f"{m.group(1)}<span class='badge' style='background:{color}'>{m.group(2)}</span>{m.group(3)}"
-    body_html = re.sub(r"(<strong>风险等级</strong>：)(高|中|低)(（\d+ 项信号）)", _badge, body_html)
 
     # 图表数据内联进 <script>：必须走 _json_script（转义 < 并兜底非 JSON 类型），
     # 直接 json.dumps 会因标题里的 "</script>" 提前闭合脚本、或因 np.int64 抛 TypeError

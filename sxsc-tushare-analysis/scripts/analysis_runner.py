@@ -35,7 +35,6 @@ from basic_metrics import (
 from data_api import DataAPI, data_errors, shift_date
 from result_model import DimensionResult, ResultStatus, safe_result
 from report_html import df_to_md_table, render_html_report
-from composite import calc_composite_score, calc_factor_positioning, calc_risk_budget
 from risk_modeling import (
     calc_amihud_illiquidity,
     calc_relative_strength,
@@ -275,7 +274,7 @@ class StockAnalysisRunner:
         if bench_returns:
             bench_text = f"，相对沪深300（{bench_20}%）"
             try:
-                bench_text += "跑赢" if float(ret_20) > float(bench_20) else "跑输"
+                bench_text += "高于" if float(ret_20) > float(bench_20) else "低于"
             except Exception:
                 bench_text += "——"
 
@@ -651,7 +650,8 @@ class StockAnalysisRunner:
             f"资产负债率 {self._fmt(debt) if debt is not None else 'N/A'}%。"
         )
         if fscore:
-            conclusion += f" Piotroski F-Score {fscore.get('F-Score', 'N/A')}（{fscore.get('rating', '')}）。"
+            # F-Score 是会计质量指标的原始分值，不再附加"强/中/弱"评级标签
+            conclusion += f" Piotroski F-Score {fscore.get('F-Score', 'N/A')}/9。"
         if growth:
             conclusion += (
                 f" 营收同比 {growth.get('revenue_yoy', 'N/A')}%，"
@@ -921,16 +921,17 @@ class StockAnalysisRunner:
         total_chg = round((df["holder_num"].iloc[-1] / df["holder_num"].iloc[0] - 1) * 100, 1)
         latest_chg = round(changes.iloc[-1], 1) if len(changes) > 0 else 0
 
+        # 合规：只描述户数方向，不用"筹码集中/分散"这类带有资金意图暗示的标签
         if latest_chg < -3:
-            signal = "筹码趋于集中（户数下降）"
+            signal = "股东户数下降"
         elif latest_chg > 3:
-            signal = "筹码趋于分散（户数上升）"
+            signal = "股东户数上升"
         elif total_chg < -15:
-            signal = "中期筹码趋于集中"
+            signal = "中期股东户数下降"
         elif total_chg > 15:
-            signal = "中期筹码趋于分散"
+            signal = "中期股东户数上升"
         else:
-            signal = "筹码稳定"
+            signal = "股东户数基本稳定"
 
         # 前十大股东/流通股东集中度
         top10_holders = self.api.get_top10_holders(self.ts_code, self.end_date)
@@ -1059,7 +1060,7 @@ class StockAnalysisRunner:
                                f"减持 {trade_summary['sell_records']} 位（非公告口径）")
         if pledge_info and pledge_info.get("pledge_ratio") is not None:
             _pr = pledge_info["pledge_ratio"]
-            conclusion += f"；股权质押比例 {_pr}%（{int(pledge_info.get('pledge_count') or 0)} 笔）" + ("，质押比例偏高" if _pr > 30 else "")
+            conclusion += f"；股权质押比例 {_pr}%（{int(pledge_info.get('pledge_count') or 0)} 笔）"
         if rewards_info:
             conclusion += f"；现任高管 {rewards_info['count']} 人（{rewards_info['end_date']} 报告期合计薪酬 {self._fmt(rewards_info['total_reward_wan'])} 万元）"
 
@@ -1415,6 +1416,11 @@ class StockAnalysisRunner:
     # ---------- 维度：风险提示（汇总） ----------
 
     def analyze_risk(self) -> DimensionResult:
+        """列示可复核的客观风险指标，不做综合风险评级。
+
+        合规边界：只陈述指标读数，不再合成"风险等级/风险数量"，
+        避免被理解为对具体证券的风险评级或投资建议。
+        """
         risks = []
         notes = []
 
@@ -1423,32 +1429,29 @@ class StockAnalysisRunner:
             vol = trend.data.get("volatility")
             mdd = trend.data.get("max_drawdown")
             rsi = trend.data.get("rsi", {})
-            if isinstance(vol, (int, float)) and vol > 40:
-                risks.append(f"年化波动率 {vol}% 偏高")
-            if isinstance(mdd, (int, float)) and mdd < -30:
-                risks.append(f"近一年最大回撤 {mdd}% 较深")
-            if isinstance(rsi.get("RSI"), (int, float)) and rsi["RSI"] > 70:
-                risks.append(f"RSI 为 {rsi['RSI']}，高于超买阈值 70")
-            if isinstance(rsi.get("RSI"), (int, float)) and rsi["RSI"] < 30:
-                risks.append(f"RSI 为 {rsi['RSI']}，低于超卖阈值 30")
+            if isinstance(vol, (int, float)):
+                risks.append(f"年化波动率 {vol}%")
+            if isinstance(mdd, (int, float)):
+                risks.append(f"近一年最大回撤 {mdd}%")
+            if isinstance(rsi.get("RSI"), (int, float)):
+                risks.append(f"RSI {rsi['RSI']}")
 
         valuation = self.results.get("valuation")
         if valuation and valuation.is_ok() and valuation.data:
             pe_hist = valuation.data.get("pe_hist_percentile")
             pb_hist = valuation.data.get("pb_hist_percentile")
-            if isinstance(pe_hist, (int, float)) and pe_hist > 80:
-                risks.append(f"PE 历史分位 {pe_hist}%，估值偏高")
-            if isinstance(pb_hist, (int, float)) and pb_hist > 80:
-                risks.append(f"PB 历史分位 {pb_hist}%，估值偏高")
+            if isinstance(pe_hist, (int, float)):
+                risks.append(f"PE 近5年历史分位 {pe_hist}%")
+            if isinstance(pb_hist, (int, float)):
+                risks.append(f"PB 近5年历史分位 {pb_hist}%")
 
         financial = self.results.get("financial")
         if financial and financial.is_ok() and financial.data:
             debt = financial.data.get("latest", {}).get("debt_to_assets")
-            if isinstance(debt, (int, float)) and debt > 80:
-                risks.append(f"资产负债率 {debt}% 较高")
+            if isinstance(debt, (int, float)):
+                risks.append(f"资产负债率 {debt}%")
             fc = financial.data.get("forecast")
-            if fc and fc.get("type") in ("预减", "首亏", "续亏", "略减"):
-                # 不能用 `days or 999`：公告日=分析截止日时 days=0 会被误判为过期
+            if fc and fc.get("type"):
                 _fd = self._forecast_days(fc)
                 if _fd is not None and _fd <= 150:
                     risks.append(f"业绩预告类型：{fc['type']}（报告期 {fc.get('end_date', '')}）")
@@ -1456,76 +1459,64 @@ class StockAnalysisRunner:
         moneyflow = self.results.get("moneyflow")
         if moneyflow and moneyflow.is_ok() and moneyflow.data:
             net5 = moneyflow.data.get("net_inflow_5d_billion")
-            if isinstance(net5, (int, float)) and net5 < -5:
-                risks.append(f"近5日主力净流出 {-net5:.2f}亿")
+            if isinstance(net5, (int, float)):
+                risks.append(f"近5日全口径净流入 {net5:.2f}亿")
 
         margin = self.results.get("margin")
         if margin and margin.is_ok() and margin.data:
             chg = margin.data.get("rzye_chg_5d_pct")
             if isinstance(chg, (int, float)):
-                if chg > 10:
-                    risks.append(f"融资余额近5日上升 {chg:.2f}%，杠杆参与度提升")
-                elif chg < -10:
-                    risks.append(f"融资余额近5日下降 {chg:.2f}%，杠杆参与度回落")
+                risks.append(f"融资余额近5日变化 {chg:+.2f}%")
 
         market = self.results.get("market_activity")
         if market and market.is_ok() and market.data:
             if market.data.get("limit_records"):
-                risks.append(f"最近交易日 {market.data['trade_date']} 出现涨跌停异动")
+                risks.append(f"最近交易日 {market.data['trade_date']} 有涨跌停记录")
             if market.data.get("top_inst_records"):
-                risks.append(f"最近交易日 {market.data['trade_date']} 出现机构席位异动")
+                risks.append(f"最近交易日 {market.data['trade_date']} 有机构席位记录")
 
         shareholder = self.results.get("shareholder")
         if shareholder and shareholder.is_ok() and shareholder.data:
-            signal = shareholder.data.get("signal", "")
-            if "分散" in signal:
-                risks.append(f"股东筹码：{signal}")
-
-        # 质押/审计意见/披露窗口/严重异常波动/重点提示
-        if shareholder and shareholder.is_ok() and shareholder.data:
             pl = shareholder.data.get("pledge") or {}
-            if isinstance(pl.get("pledge_ratio"), (int, float)) and pl["pledge_ratio"] > 30:
-                risks.append(f"股权质押比例 {pl['pledge_ratio']}% 偏高（大股东资金压力信号）")
+            if isinstance(pl.get("pledge_ratio"), (int, float)):
+                risks.append(f"股权质押比例 {pl['pledge_ratio']}%")
+
         if financial and financial.is_ok() and financial.data:
             au = financial.data.get("audit") or {}
             if au.get("audit_result") and "标准无保留" not in str(au.get("audit_result")):
-                risks.append(f"审计意见非标准无保留：{au.get('audit_result')}（{au.get('end_date')} 年报）")
+                risks.append(f"审计意见：{au.get('audit_result')}（{au.get('end_date')} 年报）")
             nd = financial.data.get("next_disclosure")
             if nd and nd.get("pre_date"):
                 try:
                     _dd = (datetime.strptime(str(nd["pre_date"]), "%Y%m%d") - datetime.strptime(self.end_date, "%Y%m%d")).days
                     if 0 <= _dd <= 30:
-                        risks.append(f"下一期财报预定披露日 {nd['pre_date']}（{_dd} 天后），临近业绩事件窗口")
+                        risks.append(f"下一期财报预定披露日 {nd['pre_date']}（{_dd} 天后）")
                 except Exception:
                     pass
+
         if market and market.is_ok() and market.data:
             if market.data.get("high_shock_records"):
                 risks.append(f"近一年严重异常波动 {len(market.data['high_shock_records'])} 次")
             if market.data.get("alert_records"):
-                risks.append(f"该股被交易所重点提示 {len(market.data['alert_records'])} 次")
+                risks.append(f"交易所重点提示 {len(market.data['alert_records'])} 次")
             if any(str(r.get("suspend_type")) == "S" for r in market.data.get("suspend_records", [])):
-                risks.append(f"近60日有停牌记录（{len(market.data['suspend_records'])} 条停复牌事件），该期间流动性受限")
+                risks.append(f"近60日停牌记录 {len(market.data['suspend_records'])} 条")
 
-        # VaR/CVaR
-        trend = self.results.get("trend")
         if trend and trend.is_ok() and trend.data:
             if trend.data.get("var_cvar"):
                 vc = trend.data["var_cvar"]
                 var95 = vc.get("VaR(95%)")
-                if var95 and float(var95.rstrip("%")) < -3:
-                    risks.append(f"日收益率 VaR(95%) 为 {var95}，尾部风险较高")
+                if var95:
+                    risks.append(f"日收益率 VaR(95%) {var95}")
             if trend.data.get("tail_risk"):
                 tr = trend.data["tail_risk"]
-                if tr.get("risk"):
-                    risks.append(f"尾部风险：{tr['risk']}，偏度 {tr.get('偏度')}，峰度(超额) {tr.get('峰度(超额)')}")
+                risks.append(f"收益分布{tr.get('interpretation', '')}，偏度 {tr.get('偏度')}，超额峰度 {tr.get('峰度(超额)')}")
             if trend.data.get("amihud"):
                 am = trend.data["amihud"]
-                interp = am.get("interpretation", "")
-                if "流动性差" in interp or "较差" in interp:
-                    risks.append(f"Amihud 非流动性：{interp}")
+                risks.append(f"Amihud 非流动性 {am.get('Amihud非流动性')}（越高表示单位成交额的价格冲击越大）")
 
         if not risks:
-            risks.append("未发现显著风险信号（基于已有维度）")
+            risks.append("未列示额外风险指标")
 
         for dim, res in self.results.items():
             if dim == "risk":
@@ -1533,17 +1524,7 @@ class StockAnalysisRunner:
             if res.status != ResultStatus.SUCCESS:
                 notes.append(f"{dim}：{res.note or '数据缺失'}")
 
-        # 风险分级：命中高风险关键词（非标审计/质押/严重异常波动/停牌/尾部风险）或信号较多 → 高；有信号 → 中；无 → 低
-        _placeholder = risks == ["未发现显著风险信号（基于已有维度）"]
-        _severe_kw = ("非标准无保留", "质押", "严重异常波动", "停牌", "尾部风险较高", "尾部风险高")
-        _has_severe = any(any(k in r for k in _severe_kw) for r in risks)
-        if _has_severe or (not _placeholder and len(risks) >= 5):
-            risk_level = "高"
-        elif not _placeholder:
-            risk_level = "中"
-        else:
-            risk_level = "低"
-        return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes, "risk_level": risk_level, "risk_count": 0 if _placeholder else len(risks)}, risks=risks)
+        return DimensionResult.success("风险提示", data={"risks": risks, "notes": notes}, risks=risks)
 
     # ---------- 执行入口 ----------
 
@@ -1606,17 +1587,17 @@ class StockAnalysisRunner:
 
     # 各维度含义描述（面向非专业读者，标题后以引用块呈现，区别于数据描述句）
     DIM_DESCRIPTIONS = {
-        "overview": "标的基础档案：代码、行业、上市地、主业与规模，回答“这是什么公司”。",
-        "trend": "价格走势与动量：区间涨跌幅、波动率、回撤、技术指标与基准对比，判断趋势方向与风险水平。",
-        "valuation": "估值水平：PE/PB/股息率及其历史分位与行业截面分位，判断“贵不贵”。",
-        "financial": "财务质量：ROE、毛利率、负债率、增速与 F-Score，判断“赚不赚钱、稳不稳”。",
-        "moneyflow": "资金动向：主力/超大单/北向资金净流入，判断大资金在买还是卖。",
-        "shareholder": "股东筹码：户数变化、前十大持股与大股东增减持，判断筹码集中度与机构动向。",
-        "float": "解禁压力：未来3个月限售股释放计划，判断潜在的供给冲击。",
-        "margin": "两融杠杆：融资融券余额变化，反映市场杠杆情绪与杠杆资金进出方向。",
-        "market_activity": "市场异动：涨跌停、龙虎榜与机构席位，捕捉短期资金的极端关注。",
-        "macro": "宏观环境：大盘走势、CPI/PPI、LPR 与 GDP，判断整体顺风或逆风。",
-        "risk": "风险提示：汇总各维度风险信号，给出综合风险分级。",
+        "overview": "标的基础档案：代码、行业、上市地、主业与规模。",
+        "trend": "价格走势与风险指标：区间涨跌幅、波动率、回撤、技术指标与基准对比的读数。",
+        "valuation": "估值指标：PE/PB、股息率及其历史分位与行业截面分位。",
+        "financial": "财务指标：ROE、毛利率、负债率、增速与 F-Score 原始分值。",
+        "moneyflow": "资金流向：全口径/超大单/主力口径净流入与北向成交记录。",
+        "shareholder": "股东数据：户数变化、前十大持股与大股东增减持记录。",
+        "float": "解禁计划：未来3个月限售股释放计划。",
+        "margin": "两融数据：融资融券余额变化。",
+        "market_activity": "市场异动记录：涨跌停、龙虎榜、机构席位与停复牌。",
+        "macro": "宏观指标：大盘走势、CPI/PPI、LPR 与 GDP 读数。",
+        "risk": "风险指标：列示各维度可复核的风险指标读数，不做综合评级。",
     }
 
     def _fmt(self, x, digits=2):
@@ -1717,11 +1698,13 @@ class StockAnalysisRunner:
             "",
             f"> 数据日期：{_ds[-1] if _ds else self.end_date}（Tushare 数据为 T-1 日，即最新已发布数据）",
             "",
+            "> 合规说明：本报告仅展示 T-1 历史数据的统计结果，不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成投资建议或投资顾问服务；未经人工分析师审核，不得作为对外发布的证券研究报告使用。",
+            "",
         ]
 
         # 按顺序输出维度，带编号
         dim_order = [d for d in self.dimensions if d in self.results]
-        # risk 放到最后（整体分析评价之前）
+        # risk 放到最后（指标摘要之前）
         risk_dim = "risk" if "risk" in dim_order else None
         ordered = [d for d in dim_order if d != "risk"]
 
@@ -1748,9 +1731,6 @@ class StockAnalysisRunner:
             res = self.results[risk_dim]
             lines.append(f"## {idx}. 风险提示")
             if res.is_ok() and res.data:
-                _rl = res.data.get("risk_level")
-                if _rl:
-                    lines.append(f"**风险等级**：{_rl}（{res.data.get('risk_count', 0)} 项信号）")
                 for r in res.data.get("risks", []):
                     lines.append(f"- {r}")
                 notes = res.data.get("notes", [])
@@ -1760,20 +1740,20 @@ class StockAnalysisRunner:
                     for n in notes:
                         lines.append(f"- {n}")
             else:
-                lines.append(f"- {res.note or '未发现显著风险信号'}")
+                lines.append(f"- {res.note or '未列示额外风险指标'}")
             lines.append("")
 
-        # 整体分析评价
+        # 跨维度指标摘要（不做综合评级）
         idx += 1
-        lines.append(f"## {idx}. 整体分析评价")
+        lines.append(f"## {idx}. 指标摘要")
         lines.append(self._overall_evaluation())
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由AI基于山西证券Tushare平台数据自动生成，所有内容均为 T-1 日历史数据的客观统计与描述，不含对证券价格走势的预测、判断或方向性建议，不构成任何投资建议、要约或财务指导。*")
+        lines.append("*本报告由程序基于山西证券 Tushare 平台的 T-1 历史数据自动生成，仅作数据统计与展示：不含证券估值意见、投资评级、目标价、买卖建议或收益预测，不构成任何投资建议、投资顾问服务或要约。报告未经人工分析师审核，不得作为对外发布的证券研究报告使用。*")
         return "\n".join(lines)
 
     def _overall_evaluation(self) -> str:
-        """跨维度整体分析评价：综合判断 → 分维度要点 → 风格定位 → 结论。"""
+        """跨维度指标摘要：只汇总各维度原始读数，不做综合评级、风格定位或买卖建议。"""
         trend = self.results.get("trend")
         valuation = self.results.get("valuation")
         financial = self.results.get("financial")
@@ -1788,48 +1768,7 @@ class StockAnalysisRunner:
         mf_ok = moneyflow and moneyflow.is_ok() and moneyflow.data
         sh_ok = shareholder and shareholder.is_ok() and shareholder.data
 
-        lines = []
-
-        # ---- 综合判断（一句话定位）----
-        tags = []
-        if val_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            pb_hist = self._f(self._v(valuation.data, "pb_hist_percentile"))
-            if pe_hist is not None and pb_hist is not None:
-                if pe_hist < 30 and pb_hist < 30:
-                    tags.append("低估值")
-                elif pe_hist > 70 or pb_hist > 70:
-                    tags.append("估值偏高")
-        if trend_ok:
-            beta = self._f(self._v(trend.data.get("beta_alpha") or {}, "Beta"))
-            _r2_style = self._f((trend.data.get("beta_alpha") or {}).get("R2"))
-            if beta is not None and _r2_style is not None and _r2_style < 0.3:
-                beta = None  # 回归解释力弱，Beta 不作为风格判定依据
-            vol = self._f(self._v(trend.data, "volatility"))
-            if beta is not None and beta < 0.8:
-                tags.append("防御型")
-            elif beta is not None and beta > 1.2:
-                tags.append("高弹性")
-            if vol is not None and vol < 20:
-                tags.append("低波动")
-            elif vol is not None and vol > 35:
-                tags.append("高波动")
-        if fin_ok:
-            roe = self._annualized_roe(financial)
-            if roe is not None and roe > 15:
-                tags.append("高盈利")
-            elif roe is not None and roe < 5:
-                tags.append("盈利偏弱")
-        if val_ok:
-            dv = self._f(self._v(valuation.data, "dividend_yield"))
-            if dv is not None and dv > 4:
-                tags.append("高股息")
-
-        name = self.stock_name or self.ts_code
-        if tags:
-            lines.append(f"**综合判断**：{name}当前具备{'、'.join(tags[:4])}特征。")
-        else:
-            lines.append(f"**综合判断**：{name}当前各项指标相对中性，无明显极端特征。")
+        lines = [f"**指标摘要**：{self.stock_name or self.ts_code} 各维度原始读数如下。"]
 
         # ---- 分维度要点 ----
         points = []
@@ -1881,14 +1820,17 @@ class StockAnalysisRunner:
             points.append(f"- **资金**：近5日全口径净流入 {self._fmt(net5)}亿，近20日 {self._fmt(net20)}亿；"
                           f"主力口径（大单+超大单）近5日 {self._fmt(main5)}亿")
         if sh_ok:
-            signal = self._v(shareholder.data, "signal")
-            ht = shareholder.data.get("holder_trade") or {}
-            if ht:
-                _scope = "公告口径" if ht.get("source") == "stk_holdertrade" else "前十大持股变动口径"
-                ht_text = f"，股东增持{ht.get('buy_records',0)}次/减持{ht.get('sell_records',0)}次（{_scope}）"
-            else:
-                ht_text = ""
-            points.append(f"- **筹码**：{signal}{ht_text}")
+            _hn = self._v(shareholder.data, "holder_num")
+            _q = self._v(shareholder.data, "latest_qoq")
+            _t = self._v(shareholder.data, "total_chg_pct")
+            _ht = shareholder.data.get("holder_trade") or {}
+            _ht_text = ""
+            if _ht:
+                _scope = "公告口径" if _ht.get("source") == "stk_holdertrade" else "前十大持股变动口径"
+                _ht_text = (f"，增减持记录：增持{_ht.get('buy_records', 0)}次/"
+                            f"减持{_ht.get('sell_records', 0)}次（{_scope}）")
+            points.append(f"- **筹码**：股东户数 {self._fmt(_hn)}，环比 {self._fmt(_q)}%，"
+                          f"中期变化 {self._fmt(_t)}%{_ht_text}")
         if margin and margin.is_ok() and margin.data:
             rzye = self._v(margin.data, "rzye_billion")
             rzye_chg = self._v(margin.data, "rzye_chg_5d_pct")
@@ -1903,112 +1845,12 @@ class StockAnalysisRunner:
             lines.append("")
             lines.extend(points)
 
-        # ---- 风格定位 ----
-        style_parts = []
-        if val_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            pb_hist = self._f(self._v(valuation.data, "pb_hist_percentile"))
-            dv = self._f(self._v(valuation.data, "dividend_yield"))
-            if pe_hist is not None and pe_hist < 30 and dv is not None and dv > 3:
-                style_parts.append("低估值高股息")
-            elif pe_hist is not None and pe_hist > 70:
-                style_parts.append("估值偏高")
-        if trend_ok:
-            beta = self._f(self._v(trend.data.get("beta_alpha") or {}, "Beta"))
-            _r2_style = self._f((trend.data.get("beta_alpha") or {}).get("R2"))
-            if beta is not None and _r2_style is not None and _r2_style < 0.3:
-                beta = None  # 回归解释力弱，Beta 不作为风格判定依据
-            vol = self._f(self._v(trend.data, "volatility"))
-            if beta is not None and beta < 0.8 and vol is not None and vol < 25:
-                style_parts.append("防御型")
-            elif beta is not None and beta > 1.2:
-                style_parts.append("进攻型/高弹性")
-        if fin_ok:
-            roe = self._annualized_roe(financial)
-            if roe is not None and roe > 15:
-                style_parts.append("高盈利质量")
-            elif roe is not None and roe < 5:
-                style_parts.append("盈利偏弱")
-
-        if style_parts:
-            lines.append("")
-            _st = "/".join(style_parts)
-            _st = _st[:-1] if _st.endswith("型") else _st  # 元素自带"型"后缀，避免"防御型型资产"
-            lines.append(f"**风格定位**：{name}属于{_st}型资产。")
-
-        # ---- 结论 ----
-        concl_parts = []
-        if val_ok and trend_ok:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile"))
-            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%"))
-            if pe_hist is not None and pe_hist < 30:
-                concl_parts.append(f"PE 处于近5年历史分位 {pe_hist}%")
-            elif pe_hist is not None and pe_hist > 70:
-                concl_parts.append(f"PE 处于近5年历史分位 {pe_hist}%")
-            if ret250 is not None and ret250 < -10:
-                concl_parts.append("近期走势偏弱")
-            elif ret250 is not None and ret250 > 20:
-                concl_parts.append("近期走势较强")
-        if fin_ok:
-            debt = self._f(self._v(financial.data, "latest", "debt_to_assets"))
-            if debt is not None and debt > 80:
-                concl_parts.append("资产负债率偏高")
-            fc = financial.data.get("forecast") or {}
-            if fc and fc.get("type") in ("预增", "略增"):
-                _fd = self._forecast_days(fc)
-                if _fd is not None and _fd <= 150:
-                    concl_parts.append(f"业绩预告类型：{fc.get('type')}（报告期 {fc.get('end_date', '')}）")
-        if mf_ok:
-            net5 = self._f(self._v(moneyflow.data, "net_inflow_5d_billion"))
-            if net5 is not None and abs(net5) > 2:
-                concl_parts.append(f"近5日全口径净流入 {net5}亿")
-
-        # ---- 因子综合评分 + 三维定位 + 风险预算（分析输入，置于结论之前）----
-        try:
-            pe_hist = self._f(self._v(valuation.data, "pe_hist_percentile")) if val_ok else None
-            fscore = self._f(self._v(financial.data.get("fscore") or {}, "F-Score")) if fin_ok else None
-            ret250 = self._f(self._v(trend.data, "returns", "近250日涨幅%")) if trend_ok else None
-            sharpe = self._f(self._v(trend.data, "sharpe")) if trend_ok else None
-
-            composite = calc_composite_score(pe_hist, fscore, ret250, sharpe, None)
-            if composite.get("composite") is not None:
-                lines.append("")
-                lines.append(f"**因子综合评分**：{composite['composite']}（{composite['rating']}，等权雏形非IC优化，仅供参考）")
-                fac = composite.get("factors", {})
-                if fac:
-                    lines.append(f"- 各维子分：{' / '.join(f'{k}{v}' for k, v in fac.items())}")
-
-            positioning = calc_factor_positioning(pe_hist, fscore, ret250)
-            if positioning.get("positioning"):
-                lines.append("")
-                lines.append(f"**因子定位**：{positioning['positioning']}")
-
-            if trend_ok:
-                var_cvar = trend.data.get("var_cvar") or {}
-                var95_str = var_cvar.get("VaR(95%)")
-                var95 = self._f(str(var95_str).rstrip("%")) if isinstance(var95_str, str) else None
-                mdd = self._f(self._v(trend.data, "max_drawdown"))
-                beta = self._f(self._v(trend.data.get("beta_alpha") or {}, "Beta"))
-                amihud = self._f(trend.data["amihud"].get("Amihud非流动性")) if trend.data.get("amihud") else None
-                vol = self._f(self._v(trend.data, "volatility"))
-                budget = calc_risk_budget(var95, mdd, beta, amihud, vol)
-                if budget.get("risk_level"):
-                    lines.append("")
-                    # 合规：只列风险因子的客观测算值与定性等级，不给出仓位/配置比例
-                    lines.append(f"**风险因子测度**：风险等级 {budget['risk_level']}（由回撤/波动/Beta/流动性/VaR 等因子综合测算，为数据统计结果，不含仓位或配置建议）")
-                    for r in budget.get("reasons", []):
-                        lines.append(f"- {r}")
-        except Exception:
-            pass
-
-        if concl_parts:
-            lines.append("")
-            lines.append(f"**数据汇总**：{name}{'，'.join(concl_parts)}。以上均为 T-1 历史数据的统计描述，不含对标的方向性判断或操作建议。")
-
-        return "\n".join(lines) if lines else "维度数据不完整，暂无法给出跨维度综合判断。"
+        lines.append("")
+        lines.append("以上均为 T-1 历史数据的统计描述，不含估值意见、投资评级、目标价、买卖建议或收益预测。")
+        return "\n".join(lines)
 
     def _render_dimension(self, res) -> list:
-        """渲染单个维度的数据表 + 分析评价。"""
+        """渲染单个维度的数据表 + 指标说明。"""
         lines = []
         data = res.data or {}
         import pandas as pd
@@ -2119,11 +1961,7 @@ class StockAnalysisRunner:
                 adv.append(f"滚动夏普(60日) {rs.get('当前滚动夏普','N/A')}({rs.get('趋势','')})")
             if data.get("relative_strength"):
                 rs = data["relative_strength"]
-                try:
-                    _rsv = "跑赢" if float(rs.get("RS", 0)) > 1 else "跑输"
-                except Exception:
-                    _rsv = ""
-                adv.append(f"相对强度RS {rs.get('RS','N/A')}（{_rsv}，趋势{rs.get('trend','')}）")
+                adv.append(f"相对强度RS {rs.get('RS','N/A')}（20日变化 {rs.get('trend','')}）")
             if data.get("tail_risk"):
                 tr = data["tail_risk"]
                 adv.append(f"尾部风险: 偏度{tr.get('偏度','N/A')}, 峰度{tr.get('峰度(超额)','N/A')}")
@@ -2134,7 +1972,7 @@ class StockAnalysisRunner:
                     _am_txt = f"{float(_am_raw):.6f}".rstrip("0").rstrip(".") if isinstance(_am_raw, (int, float)) else str(_am_raw)
                 except Exception:
                     _am_txt = str(_am_raw)
-                adv.append(f"Amihud非流动性 {_am_txt}（{am.get('interpretation', '')}）")
+                adv.append(f"Amihud非流动性 {_am_txt}（单位成交额的价格冲击，数值越大冲击越大）")
             if data.get("var_cvar"):
                 vc = data["var_cvar"]
                 adv.append(f"VaR(95%) {vc.get('VaR(95%)','N/A')} | CVaR(95%) {vc.get('CVaR(95%)','N/A')}")
@@ -2143,7 +1981,7 @@ class StockAnalysisRunner:
                 for a in adv:
                     lines.append(f"- {a}")
 
-            # 分析评价
+            # 指标说明
             lines.append("")
             lines.append(self._trend_eval(data))
 
@@ -2198,7 +2036,7 @@ class StockAnalysisRunner:
                 lines.append(self._md(pd.DataFrame(g_rows)))
             fs = data.get("fscore") or {}
             if fs:
-                lines.append(f"\n**Piotroski F-Score**：{fs.get('F-Score','N/A')}（{fs.get('rating','N/A')}），有效项 {fs.get('有效项','N/A')}/{(fs.get('有效项',0) or 0) + (fs.get('缺失项',0) or 0)}")
+                lines.append(f"\n**Piotroski F-Score**：{fs.get('F-Score','N/A')}/9，有效项 {fs.get('有效项','N/A')}/{(fs.get('有效项',0) or 0) + (fs.get('缺失项',0) or 0)}")
                 if fs.get("comp_note"):
                     lines.append(f"- {fs['comp_note']}")
             fc = data.get("forecast") or {}
@@ -2289,7 +2127,7 @@ class StockAnalysisRunner:
                 {"指标": "最新股东户数", "数值": self._fmt(data.get("holder_num"))},
                 {"指标": "环比变化", "数值": f"{self._fmt(data.get('latest_qoq'))}%"},
                 {"指标": "中期变化", "数值": f"{self._fmt(data.get('total_chg_pct'))}%"},
-                {"指标": "信号", "数值": data.get("signal", "N/A")},
+                {"指标": "户数变化", "数值": data.get("signal", "N/A")},
             ]
             lines.append("")
             lines.append("**股东户数（筹码集中度）**：")
@@ -2302,8 +2140,7 @@ class StockAnalysisRunner:
                     lines.append(self._md(pd.DataFrame(ht["latest_records"]).rename(columns={"holder_name": "股东名称", "hold_change": "持股变动(股)", "hold_ratio": "持股比例%"})))
             pl = data.get("pledge")
             if pl:
-                _pl_high = isinstance(pl.get("pledge_ratio"), (int, float)) and pl.get("pledge_ratio") > 30
-                lines.append(f"\n**股权质押（{pl.get('end_date', 'N/A')}）**：质押 {self._fmt(pl.get('pledge_count'), digits=0)} 笔，质押比例 {self._fmt(pl.get('pledge_ratio'))}%" + ("（偏高）" if _pl_high else ""))
+                lines.append(f"\n**股权质押（{pl.get('end_date', 'N/A')}）**：质押 {self._fmt(pl.get('pledge_count'), digits=0)} 笔，质押比例 {self._fmt(pl.get('pledge_ratio'))}%")
             mr = data.get("manager_rewards")
             if mr:
                 _hold = f"，合计持股 {self._fmt(mr.get('total_hold_vol'), digits=0)} 股" if mr.get("total_hold_vol") is not None else "（持股数据未披露）"
@@ -2374,34 +2211,34 @@ class StockAnalysisRunner:
 
         return [l for l in lines if l is not None]
 
-    # ---------- 各维度分析评价 ----------
+    # ---------- 各维度指标说明 ----------
 
     def _trend_eval(self, data):
+        """展示趋势/技术指标的读数，不做方向性评价。"""
         parts = []
         returns = data.get("returns", {})
-        ret20 = self._fmt(returns.get("近20日涨幅%"))
-        ret250 = self._fmt(returns.get("近250日涨幅%"))
-        mdd = self._fmt(data.get("max_drawdown"))
+        parts.append(f"近20日涨跌幅 {self._fmt(returns.get('近20日涨幅%'))}%，"
+                     f"近250日 {self._fmt(returns.get('近250日涨幅%'))}%，"
+                     f"最大回撤 {self._fmt(data.get('max_drawdown'))}%。")
         rsi = data.get("rsi", {}).get("RSI", "N/A")
-        macd_sig = data.get("macd", {}).get("signal", "")
-        boll_pos = data.get("boll", {}).get("position", "")
-        parts.append(f"近20日涨跌幅 {ret20}%，近250日 {ret250}%，最大回撤 {mdd}%。")
         try:
             rsi_f = float(rsi)
-            parts.append(f"RSI {rsi} 处于{'超卖(<30)' if rsi_f < 30 else '超买(>70)' if rsi_f > 70 else '中性区间'}。")
+            parts.append(f"RSI {rsi}（{'低于30' if rsi_f < 30 else '高于70' if rsi_f > 70 else '30–70之间'}）。")
         except Exception:
             pass
+        macd_sig = data.get("macd", {}).get("signal", "")
         if macd_sig:
-            parts.append(f"MACD {macd_sig}。")
+            parts.append(f"MACD 状态：{macd_sig}。")
+        boll_pos = data.get("boll", {}).get("position", "")
         if boll_pos:
-            parts.append(f"布林带{boll_pos}。")
+            parts.append(f"布林带位置：{boll_pos}。")
         rb = data.get("rolling_beta", {})
         if rb:
-            parts.append(f"滚动Beta {rb.get('当前Beta','N/A')}，趋势{rb.get('趋势','N/A')}。")
+            parts.append(f"滚动 Beta {rb.get('当前Beta','N/A')}（趋势 {rb.get('趋势','N/A')}）。")
         rs = data.get("relative_strength", {})
         if rs:
-            parts.append(f"相对沪深300 RS {rs.get('RS','N/A')}，{'相对走强' if rs.get('RS',1) and float(rs.get('RS',1)) > 1 else '相对走弱'}。")
-        return "**分析评价**：" + "".join(parts)
+            parts.append(f"相对沪深300 RS {rs.get('RS','N/A')}（20日变化 {rs.get('trend','N/A')}）。")
+        return "**指标说明**：" + "".join(parts)
 
     def _valuation_eval(self, data):
         pe_hist = data.get("pe_hist_percentile")
@@ -2409,53 +2246,31 @@ class StockAnalysisRunner:
         pe = data.get("pe_ttm")
         ind_pe = (data.get("industry") or {}).get("pe_median")
         parts = []
+        if pe_hist is not None or pb_hist is not None:
+            parts.append(f"PE 近5年历史分位 {self._fmt(pe_hist)}%，"
+                         f"PB 近5年历史分位 {self._fmt(pb_hist)}%。")
         try:
-            pe_f = float(pe_hist)
-            pb_f = float(pb_hist)
-            vert = '偏低' if pe_f < 30 and pb_f < 30 else '偏高' if pe_f > 70 or pb_f > 70 else '中等'
-            parts.append(f"纵向历史看，PE分位{pe_f}%、PB分位{pb_f}%，历史估值{vert}；")
+            parts.append(f"当前 PE {float(pe):.2f}，同行业 PE 中位数 {float(ind_pe):.2f}。")
         except Exception:
             pass
-        try:
-            pe_v = float(pe)
-            ind_v = float(ind_pe)
-            horiz = f"与行业中位数比值 {pe_v / ind_v:.2f}倍" if ind_v else ""
-            parts.append(f"横向行业截面看，当前PE {pe_v} {'高于' if pe_v > ind_v else '低于'}行业中位数 {ind_v}" + (f"，{horiz}。" if horiz else "。"))
-        except Exception:
-            pass
-        # 高ROE个股的PB/PE截面背离解读：PB截面分位偏高可能由高ROE支撑，不构成高估证据
-        _ind_pb = (data.get("industry") or {}).get("pb_percentile")
-        _fin_res = self.results.get("financial")
-        _own_roe = self._f(self._v(_fin_res.data, "latest", "roe")) if _fin_res and _fin_res.is_ok() else None
-        try:
-            if _own_roe is not None and _ind_pb is not None and float(_ind_pb) >= 80 and pe_hist is not None and float(pe_hist) < 30:
-                parts.append(f"本股ROE {_own_roe}% 与同业存在差异，PB 行业截面分位 {self._fmt(_ind_pb)}% 与 PE 截面分位口径不一致；PB 与 PE 之比约等于 ROE，高 ROE 标的的 PB 天然高于同业，跨行业比较时 PE 口径可比性更强。")
-        except Exception:
-            pass
-
-        parts.append("纵向历史位与横向板块位反映不同口径，二者背离通常源于板块整体估值水位变化。")
-        return "**分析评价**：" + "".join(parts)
+        return "**指标说明**：" + ("".join(parts) or "估值数据不足。")
 
     def _financial_eval(self, data):
         fs = data.get("fscore") or {}
         fscore = fs.get("F-Score")
         g = data.get("growth") or {}
-        rev = g.get("revenue_yoy")
-        prof = g.get("profit_yoy")
         parts = []
         if fscore is not None:
-            parts.append(f"Piotroski F-Score {fscore}分（{'偏强' if fscore >= 7 else '偏弱' if fscore <= 2 else '中等'}）。")
+            parts.append(f"Piotroski F-Score {fscore}/9。")
         try:
-            rev_f = float(rev)
-            prof_f = float(prof)
-            parts.append(f"营收同比 {rev_f}%、净利润同比 {prof_f}%（同比增速为报告期口径）。")
+            parts.append(f"营收同比 {float(g.get('revenue_yoy'))}%、"
+                         f"净利润同比 {float(g.get('profit_yoy'))}%（报告期口径）。")
         except Exception:
             pass
-        # 只有 F-Score 明确识别出金融机构（comp_type=2/3/4）时才提示口径差异；
-        # 不能因毛利率缺失就断言是金融机构（非金融公司数据缺失同样会为空）。
+        # 只有 F-Score 明确识别出金融机构（comp_type=2/3/4）时才提示口径差异
         if fs.get("comp_note"):
             parts.append(str(fs["comp_note"]).rstrip("。") + "。")
-        return "**分析评价**：" + "".join(parts)
+        return "**指标说明**：" + "".join(parts)
 
     def _moneyflow_eval(self, data):
         net5 = data.get("net_inflow_5d_billion")
@@ -2497,67 +2312,39 @@ class StockAnalysisRunner:
             parts.append(f"北向活跃度：近60日上榜沪深股通十大成交股 {_ht10['count_60d']} 次（可作为北向交易活跃度的替代口径）。")
 
         parts.append("资金流向为短期统计口径，不含对后续资金方向或股价方向的判断。")
-        return "**分析评价**：" + "".join(parts)
+        return "**指标说明**：" + "".join(parts)
 
     def _shareholder_eval(self, data):
-        signal = data.get("signal", "")
+        """只陈述股东户数与持股变动的读数，不推断资金意图或因果关系。"""
         trade = data.get("holder_trade") or {}
-        parts = []
-        # 合规：仅陈述户数与股价的同期数值关系，不推断资金主体意图（吸筹/派发）
-        # 户数变化与股价走势为相关性观察，涨跌之间不存在已证实的因果关系
-        if "中期筹码趋于集中" in signal:
-            qoq = self._f(data.get("latest_qoq")) or 0
-            parts.append(f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，人均持股相应上升；最新一期环比 {self._fmt(data.get('latest_qoq'))}%，{'继续下降' if qoq < 0 else '有所回升'}。户数变化反映持股分布的集中度，与资金主体意图无已证实关联。")
-        elif "中期筹码趋于分散" in signal:
-            _trend_res = self.results.get("trend")
-            _chg60 = self._f(self._v(_trend_res.data, "returns", "近60日涨幅%")) if _trend_res and _trend_res.is_ok() else None
-            _base = f"中期户数累计 {self._fmt(data.get('total_chg_pct'))}%，人均持股相应下降；最新一期环比 {self._fmt(data.get('latest_qoq'))}%"
-            parts.append(_base + (f"；同期近60日股价涨幅 {_chg60}%。户数与股价为同期并列观测值，不构成因果推断。" if _chg60 is not None else "。户数与股价为同期并列观测值，不构成因果推断。"))
-        elif "集中" in signal:
-            parts.append("股东户数减少，人均持股相应上升，持股分布集中度提高。户数与股价为同期并列观测值，不构成因果推断。")
-        elif "分散" in signal:
-            _trend_res = self.results.get("trend")
-            _chg60 = self._f(self._v(_trend_res.data, "returns", "近60日涨幅%")) if _trend_res and _trend_res.is_ok() else None
-            _tail = f"同期近60日股价涨幅 {_chg60}%。" if _chg60 is not None else ""
-            parts.append("股东户数增加，人均持股相应下降，持股分布集中度降低。" + _tail + "户数与股价为同期并列观测值，不构成因果推断。")
-        else:
-            parts.append("股东户数变化幅度有限，持股分布集中度相对稳定。")
+        parts = [f"最新一期股东户数环比 {self._fmt(data.get('latest_qoq'))}%，"
+                 f"中期变化 {self._fmt(data.get('total_chg_pct'))}%。"]
         if trade:
             buy = trade.get("buy_records", 0) or 0
             sell = trade.get("sell_records", 0) or 0
-            _rel = "增持笔数多于减持笔数" if buy > sell else "减持笔数多于增持笔数" if sell > buy else "增减笔数持平"
-            # 口径必须随数据来源变化：降级路径不是公告口径，不能写成"公告口径下"
             if trade.get("source") == "stk_holdertrade":
-                parts.append(f"近半年股东增减持公告 {buy + sell} 条，增持 {buy} 次、减持 {sell} 次，{_rel}。")
+                parts.append(f"近半年股东增减持公告 {buy + sell} 条：增持 {buy} 次、减持 {sell} 次。")
             else:
-                parts.append(f"最新一期前十大股东中 {buy + sell} 位持股发生变动（增持 {buy} 位、减持 {sell} 位），"
-                             f"{_rel}；此为定期报告前十大股东口径，非增减持公告口径。")
-        return "**分析评价**：" + "".join(parts)
+                parts.append(f"最新一期前十大股东中 {buy + sell} 位持股发生变动"
+                             f"（增持 {buy} 位、减持 {sell} 位，定期报告口径）。")
+        return "**指标说明**：" + "".join(parts)
 
     def _margin_eval(self, data):
-        chg = data.get("rzye_chg_5d_pct")
-        parts = []
         try:
-            c = float(chg)
-            parts.append(f"融资余额近5日变化 {c}%，杠杆资金参与度{'上升' if c > 5 else '下降' if c < -5 else '基本持平'}。")
+            parts = [f"融资余额近5日变化 {float(data.get('rzye_chg_5d_pct'))}%。"]
         except Exception:
-            parts.append("融资余额数据不足。")
+            parts = ["融资余额数据不足。"]
         parts.append("两融余额变动为杠杆资金参与度的统计口径。")
-        return "**分析评价**：" + "".join(parts)
+        return "**指标说明**：" + "".join(parts)
 
     def _macro_eval(self, data):
-        gdp = data.get("gdp_yoy")
-        bench = data.get("benchmark_returns", {}) or {}
-        bench20 = bench.get("近20日涨幅%")
         parts = []
         try:
-            b = float(bench20)
-            parts.append(f"沪深300近20日 {b}%，大盘短期{'偏强' if b > 2 else '偏弱' if b < -2 else '震荡'}。")
+            parts.append(f"沪深300近20日 {float(data.get('benchmark_returns', {}).get('近20日涨幅%'))}%。")
         except Exception:
             pass
         try:
-            g = float(gdp)
-            parts.append(f"GDP当季同比 {g}%，宏观经济{'景气度较好' if g > 5 else '景气度偏弱' if g < 4 else '景气度平稳'}。")
+            parts.append(f"GDP当季同比 {float(data.get('gdp_yoy'))}%。")
         except Exception:
             pass
         try:
@@ -2566,12 +2353,11 @@ class StockAnalysisRunner:
             if _cpi is not None and _ppi is not None:
                 _gap = round(float(_ppi) - float(_cpi), 1)
                 if abs(_gap) >= 1:
-                    parts.append(f"PPI-CPI 剪刀差 {_gap}%（{'上游价格相对更强' if _gap > 0 else '下游价格相对更强'}，剪刀差为价格传导的结构性统计口径）。")
+                    parts.append(f"PPI-CPI 剪刀差 {_gap}%（PPI同比 − CPI同比）。")
         except Exception:
             pass
-
-        parts.append("以上为宏观统计口径的客观读数，不含对权益资产方向的判断。")
-        return "**分析评价**：" + "".join(parts)
+        parts.append("以上为宏观统计口径的读数。")
+        return "**指标说明**：" + "".join(parts)
 
 
 # ---------- 便捷函数 ----------

@@ -241,7 +241,6 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
 | `risk_modeling.py` | `calc_var_cvar`/`calc_tail_risk`/`calc_amihud_illiquidity`/`calc_rolling_beta`/`calc_rolling_sharpe`/`calc_relative_strength` |
 | `attribution.py` | `calc_beta_alpha`/`calc_piotroski_fscore` |
-| `composite.py` | `calc_composite_score`/`calc_factor_positioning`/`calc_risk_budget` |
 
 ---
 
@@ -283,8 +282,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
         ├── adjustment.py                      # 复权与归一化（adj_factor/rebase/Z-Score）
         ├── technical_indicators.py            # 技术指标（MACD/RSI/KDJ/布林带/OBV）
         ├── risk_modeling.py                   # 风险建模（VaR/尾部风险/滚动分析/RS）
-        ├── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
-        └── composite.py                       # 跨维度组合分析（技术共振/量价/多因子评分等）
+        └── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
 ```
 
 ## 注意事项
