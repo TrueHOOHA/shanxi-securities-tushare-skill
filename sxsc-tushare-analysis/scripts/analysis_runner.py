@@ -1449,7 +1449,7 @@ class StockAnalysisRunner:
         if financial and financial.is_ok() and financial.data:
             debt = financial.data.get("latest", {}).get("debt_to_assets")
             if isinstance(debt, (int, float)):
-                risks.append(f"资产负债率 {debt}%")
+                risks.append(f"资产负债率 {debt:.2f}%")
             fc = financial.data.get("forecast")
             if fc and fc.get("type"):
                 _fd = self._forecast_days(fc)
