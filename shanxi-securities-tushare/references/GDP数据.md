@@ -34,7 +34,6 @@ si_yoy | float | Y | 第二产业同比增速（%）
 ti | float | Y | 第三产业累计值（亿元）
 ti_yoy | float | Y | 第三产业同比增速（%）
 
-
 <br>
 <br>
 
@@ -42,10 +41,10 @@ ti_yoy | float | Y | 第三产业同比增速（%）
 
 ```python
 
-pro = ts.pro_api()
+import sxsc_tushare as sx
+pro = sx.get_api(env='prd')
 
 df = pro.cn_gdp(start_q='2018Q1', end_q='2019Q3')
-
 
 #获取指定字段
 df = pro.cn_gdp(start_q='2018Q1', end_q='2019Q3', fields='quarter,gdp,gdp_yoy')
@@ -55,7 +54,6 @@ df = pro.cn_gdp(start_q='2018Q1', end_q='2019Q3', fields='quarter,gdp,gdp_yoy')
 <br>
 
 **数据样例**
-
 
         quarter          gdp gdp_yoy          pi pi_yoy           si si_yoy           ti ti_yoy
 	0    2019Q4  990865.1000    6.10  70466.7000   3.10  386165.3000   5.70  534233.1000   6.90

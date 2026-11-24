@@ -1,6 +1,6 @@
 ## API 接口与参考文档对应表
 
-> **说明**：本文档建立 API 接口名称与参考文档的一对一映射关系。
+> **说明**：本文档建立 API 接口名称与参考文档的映射关系；同一接口可对应多篇场景文档（如 `trade_cal`）。
 
 | API 接口 | 参考文档 |
 |-----------|----------|
@@ -13,7 +13,6 @@
 | `cb_call` | `references/可转债赎回信息.md` |
 | `cb_daily` | `references/可转债行情.md` |
 | `cb_issue` | `references/可转债发行.md` |
-| `cb_rate` | `references/可转债条款.md` |
 | `cn_cpi` | `references/居民消费价格指数.md` |
 | `cn_gdp` | `references/GDP数据.md` |
 | `cn_m` | `references/货币供应量.md` |
@@ -62,7 +61,6 @@
 | `index_dailybasic` | `references/大盘指数每日指标.md` |
 | `index_global` | `references/国际指数.md` |
 | `index_member` | `references/申万行业成分构成.md` |
-| `index_member_all` | `references/申万行业成分股.md` |
 | `index_monthly` | `references/指数月线行情.md` |
 | `index_weekly` | `references/指数周线行情.md` |
 | `index_weight` | `references/指数成分和权重.md` |
@@ -90,16 +88,16 @@
 | `slb_sec` | `references/转融券交易汇总.md` |
 | `slb_sec_detail` | `references/转融券交易明细.md` |
 | `sz_daily_info` | `references/深圳市场每日交易情况.md` |
-| `stk_alert` | `references/交易所重点提示证券.md` |
-| `stk_high_shock` | `references/个股严重异常波动.md` |
 | `stk_holdernumber` | `references/股东人数.md` |
 | `stk_holdertrade` | `references/股东增减持.md` |
 | `stk_limit` | `references/每日涨跌停价格.md` |
 | `stk_managers` | `references/上市公司管理层.md` |
 | `stk_rewards` | `references/管理层薪酬和持股.md` |
-| `stk_shock` | `references/个股异常波动.md` |
 | `stock_basic` | `references/基础信息.md` |
 | `stock_company` | `references/上市公司基本信息.md` |
+| `stk_alert` | `references/交易所重点提示证券.md` |
+| `stk_high_shock` | `references/个股严重异常波动.md` |
+| `stk_shock` | `references/个股异常波动.md` |
 | `suspend_d` | `references/每日停复牌信息.md` |
 | `top10_floatholders` | `references/前十大流通股东.md` |
 | `top10_holders` | `references/前十大股东.md` |
@@ -109,6 +107,8 @@
 | `trade_cal` | `references/股票交易日历.md` |
 | `weekly` | `references/周线行情.md` |
 | `wz_index` | `references/温州民间借贷利率.md` |
+
+> `trade_cal` 同时服务股票和期货日历，因此保留两篇场景文档。
 
 ## 新增/变更接口的同步清单
 
@@ -120,5 +120,5 @@
 
 ### 最小验收标准
 
-- 每个接口必须在本表中可定位，且有对应的 `references/XXX.md` 文档；暂不支持的接口须在该文档中明确标注。
+- 每个接口必须在本表中可定位，且有对应的 `references/XXX.md` 文档；下线或当前 prd 不支持的接口不在本表和参考文档中保留。
 - 任一接口变更提交中，以上 3 项清单不得遗漏。

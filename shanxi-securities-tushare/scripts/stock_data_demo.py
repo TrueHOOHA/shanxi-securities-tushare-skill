@@ -93,7 +93,7 @@ def get_stock_basic_sdk(exchange="", list_status="L"):
 
 
 # ============ 接口：daily 日线行情 ============
-# 说明：获取 A 股日线行情（前复权；ah_vol/ah_amount 为盘后量额）
+# 说明：获取 A 股未复权日线行情（ah_vol/ah_amount 为盘后量额）
 # SDK 签名：pro.daily(ts_code='', trade_date='', start_date='', end_date='', fields='')
 #   ts_code/trade_date 至少给一个；日期格式 YYYYMMDD
 def get_daily_sdk(ts_code, start_date, end_date):

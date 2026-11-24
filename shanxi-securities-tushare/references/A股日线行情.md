@@ -3,7 +3,7 @@
 
 接口：daily
 描述：交易日每天15点～16点之间入库。本接口是未复权行情，停牌期间不提供数据
-限量：单次最大5000行，总量不限制（建议按 trade_date 循环拉取全市场，不要循环 ts_code 拉历史）
+限量：支持 `limit` / `offset` 分页；旧文档所述“单次最大”未被 prd 强制执行，实测可超过旧上限，大批量请按日期或代码分批。 建议按 `trade_date` 循环拉取全市场。
 
 **输入参数**
 
@@ -46,7 +46,8 @@ ah_amount | float | N | 盘后成交额（千元）
 
 ```python
 
-pro = ts.pro_api()
+import sxsc_tushare as sx
+pro = sx.get_api(env='prd')
 
 # 提取单个股票，跨时间段的历史日线
 df = pro.daily(ts_code='000001.SZ', start_date='20180701', end_date='20180718')
