@@ -188,7 +188,7 @@ class DataAPI:
 
         import sxsc_tushare as sx
 
-        # 只从 token 文件读，不再用 SXSC_TUSHARE_TOKEN 环境变量；
+        # 只从 token 文件读；
         # token 直接传给 get_api，因此不调 set_token、不重写 token 文件（只读主目录也能跑）。
         self.token = load_token()
         if not self.token:

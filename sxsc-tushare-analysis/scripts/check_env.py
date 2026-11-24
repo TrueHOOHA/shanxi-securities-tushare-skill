@@ -3,7 +3,7 @@
 """
 sxsc-tushare-analysis 自带环境校验（独立运行，不依赖任何同级 skill 目录）。
 
-token 来源：**只读 token 文件**，不再使用 `SXSC_TUSHARE_TOKEN` 环境变量。
+token 来源：**只读 token 文件**。
 文件即 `sxsc_tushare.set_token()` 写入的位置（默认 ~/sxsc_tk.csv，文件名随包构建而变，
 统一读 `upass.TOKEN_F_P` 得到），内容为 65 字节左右的 csv：首行 `token`，次行 token 值。
 

@@ -97,7 +97,7 @@ python scripts/check_env.py --check  # 只校验不写缓存
 | `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
 - 退出码非 0 表示环境未就绪（token 文件缺失、SDK 未安装或初始化失败），**先解决环境再取数**。
-- token 写入方式：`python -c "import sxsc_tushare as sx; sx.set_token('你的token')"`；不再使用 `SXSC_TUSHARE_TOKEN` 环境变量。
+- token 写入方式:`python -c "import sxsc_tushare as sx; sx.set_token(‘你的token’)"`。
 - 缓存仅存储 token_ok 状态与 SDK 安装信息，不保存 token 明文或其哈希；token_ok=true 且 token 文件实时可读时直接复用缓存。
 - 取数统一走 `sxsc_tushare` Python SDK，按 `references/调取数据.md` 的 Python SDK 节调用。
 
