@@ -3,9 +3,9 @@
 """
 校验脚本环境，并把结果缓存到 JSON，避免每次重复校验。
 
-token 来源：**只读 token 文件**。
-文件即 `sxsc_tushare.set_token()` 写入的位置（默认 ~/sxsc_tk.csv，文件名随包构建而变，
-统一读 `upass.TOKEN_F_P` 得到），内容为 65 字节左右的 csv：首行 `token`，次行 token 值。
+token 来源：**只读 token 文件**（由 `sxsc_tushare.set_token()` 写入，当前构建为 ~/sxsc_tk.csv），
+内容为 65 字节左右的 csv：首行 `token`，次行 token 值。
+不解析 SDK 内部常量：文件名走候选列表，候选都解析不到时再由 SDK 自己读。
 
 校验项：
 1. token 文件是否可读且能解析出非空 token（必选，缺失则无法执行 skill）
@@ -37,31 +37,32 @@ CACHE_FILE = Path(__file__).resolve().parent / "env_check.json"
 SDK_NAME = "sxsc_tushare"
 
 
-def _token_file_path():
-    """返回 token 文件路径。
+def _token_file_candidates():
+    """token 文件候选路径（由近到旧）。
 
-    ⚠️ 文件名**不固定**：随 sxsc_tushare 构建来源而变，同为 1.2.12 也可能不同：
-      - 新版构建（如 20261030）：~/sxsc_tk.csv
-      - 旧版构建（如 20231213）：~/jsdata_tk.csv
-    不要硬编码文件名，一律读 upass.TOKEN_F_P。
+    `sx.set_token()` 写入的文件名随包构建而变（新版 ~/sxsc_tk.csv，旧版 ~/jsdata_tk.csv），
+    这里列已知名而不去读 SDK 内部常量；候选都解析不到时，`_sdk_init_error()` 会退回
+    让 `sx.get_api(env='prd')` 自己读，所以换构建也不会误报。
     """
-    name = None
-    try:
-        import sxsc_tushare.upass as up
-        name = getattr(up, "TOKEN_F_P", None)
-    except Exception:
-        name = None
-    return os.path.join(os.path.expanduser("~"), name or "sxsc_tk.csv")
+    home = os.path.expanduser("~")
+    return [os.path.join(home, n) for n in ("sxsc_tk.csv", "jsdata_tk.csv")]
 
 
-def _load_token():
-    """读 token 文件，返回 token 或 None（不读环境变量）。
+def _token_file_path():
+    """返回实际使用的 token 文件路径：优先已存在的候选，否则主默认名（用于提示）。"""
+    for path in _token_file_candidates():
+        if os.path.isfile(path):
+            return path
+    return _token_file_candidates()[0]
+
+
+def _parse_token_file(path):
+    """解析单个 token 文件，返回 token 或 None。
 
     不直接调 `sx.get_token()`：失败时它会向 stdout 打 `get token error.`，污染日志。
     这里保持同样的解析口径，并额外容忍“只有一行 token”的手写文件（无表头）、
     UTF-16/GBK 编码（Windows PowerShell 常见）以及纯数字 token（不丢前导零）。
     """
-    path = _token_file_path()
     if not os.path.isfile(path):
         return None
     try:
@@ -102,6 +103,15 @@ def _load_token():
     return None
 
 
+def _load_token():
+    """按候选文件名读 token，返回 token 或 None（不读环境变量）。"""
+    for path in _token_file_candidates():
+        token = _parse_token_file(path)
+        if token:
+            return token
+    return None
+
+
 def _sdk_version():
     try:
         mod = importlib.import_module(SDK_NAME)
@@ -127,15 +137,27 @@ def _ensure_installed():
 def _sdk_init_error(token):
     """初始化 SDK 并做一次轻量鉴权探针；返回 None 表示可用，否则返回失败原因。
 
-    token 直接传给 get_api，**不调 set_token**，因此不会重写 token 文件。
+    不调 set_token，因此不会重写 token 文件。token 为空时退回让 SDK 自己从凭证文件读
+    （候选文件名之外的新构建也能用），并屏蔽其 stdout 噪声。
     ⚠️ get_api 只构造客户端、不校验 token；必须再调一次真实接口，否则过期/占位
     token 能通过校验，随后所有取数被静默吞掉，产出全 N/A 的报告。
     """
-    if not token:
-        return "token 未找到"
     try:
+        import contextlib
+        import io
+
         import sxsc_tushare as sx
-        api = sx.get_api(token, env="prd")
+
+        if token:
+            api = sx.get_api(token, env="prd")
+        else:
+            with contextlib.redirect_stdout(io.StringIO()):
+                api = sx.get_api(env="prd")
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return detail if token else f"token 未找到（SDK 自动读取也失败：{detail}）"
+
+    try:
         _end = datetime.now().strftime("%Y%m%d")
         _start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
         probe = api.trade_cal(exchange="SSE", start_date=_start, end_date=_end)
@@ -159,9 +181,11 @@ def run_check(install=True):
     file_exists = os.path.isfile(token_file)
     sdk_version = _sdk_version() if sdk_available else None
     sdk_init_err = _sdk_init_error(token) if sdk_available else None
+    # 文件解析不到不代表没凭证：未知构建换了文件名时 SDK 自己仍能读到，以探针为准
+    token_ok = bool(token) or (sdk_available and sdk_init_err is None)
 
     return {
-        "token_ok": bool(token),
+        "token_ok": token_ok,
         "token_file": token_file,
         "token_file_exists": file_exists,
         "token_len": len(token) if token else 0,

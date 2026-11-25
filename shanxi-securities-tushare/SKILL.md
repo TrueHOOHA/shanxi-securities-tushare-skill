@@ -93,11 +93,11 @@ python scripts/check_env.py --check  # 只校验不写缓存
 
 | 项 | 必需 | 缺失后果 |
 |---|---|---|
-| token 文件可读（默认 `~/sxsc_tk.csv`，即 `upass.TOKEN_F_P`） | 是 | 无法执行 skill，返回非零退出码，需先写入 token |
+| token 可用（`sx.set_token()` 写入的凭证文件，可由 SDK 自行读到） | 是 | 无法执行 skill，返回非零退出码，需先写入 token |
 | `sxsc_tushare` 库已安装 | 是 | 无法执行 skill；`check_env.py` 会自动 `pip install sxsc_tushare` |
 
 - 退出码非 0 表示环境未就绪（token 文件缺失、SDK 未安装或初始化失败），**先解决环境再取数**。
-- token 写入方式:`python -c "import sxsc_tushare as sx; sx.set_token(‘你的token’)"`。
+- token 写入方式：`python -c "import sxsc_tushare as sx; sx.set_token('你的token')"`。
 - 缓存仅存储 token_ok 状态与 SDK 安装信息，不保存 token 明文或其哈希；token_ok=true 且 token 文件实时可读时直接复用缓存。
 - 取数统一走 `sxsc_tushare` Python SDK，按 `references/调取数据.md` 的 Python SDK 节调用。
 
@@ -117,17 +117,11 @@ python scripts/check_env.py --check  # 只校验不写缓存
 
 ### 初始化与日线
 ```python
-import os
-
-import pandas as pd
 import sxsc_tushare as sx
-import sxsc_tushare.upass as up
 
-# token 从文件读（文件名随构建而变，统一读 upass.TOKEN_F_P），不用环境变量；
-# 不要用 sx.get_token()——失败时它会向 stdout 打印 "get token error." 噪声。
-_token_path = os.path.join(os.path.expanduser("~"), getattr(up, "TOKEN_F_P", "sxsc_tk.csv"))
-token = pd.read_csv(_token_path, dtype=str)["token"].iloc[0].strip()
-pro = sx.get_api(token, env='prd')  # 'prd' 仿真, 'qa' 生产
+# 凭证由 SDK 自行从 token 文件读，无需手工解析；首次写入一次即可：
+#   python -c "import sxsc_tushare as sx; sx.set_token('你的token')"
+pro = sx.get_api(env='prd')  # 'prd' 仿真, 'qa' 生产
 
 # 股票列表
 pro.stock_basic(exchange='', list_status='L',

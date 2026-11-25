@@ -47,7 +47,7 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
 
 ### Token 文件配置
 
-Token 以**明文文件**形式保存在用户主目录，不再使用环境变量。文件路径由 `sxsc_tushare.upass.TOKEN_F_P` 决定（新版构建为 `~/sxsc_tk.csv`，旧构建可能为 `~/jsdata_tk.csv`），内容为两行 csv：首行 `token`，次行 token 值。
+Token 以**明文文件**形式保存在用户主目录，不再使用环境变量。文件名由 SDK 内部决定，不要在自己代码里 import 内部模块去拼路径——直接 `pro = sx.get_api(env='prd')`，SDK 会自己找到它；当前构建写入 `~/sxsc_tk.csv`，内容为两行 csv：首行 `token`，次行 token 值。
 
 **推荐：用 SDK 写入（自动生成正确的文件名与格式）**
 
@@ -55,22 +55,21 @@ Token 以**明文文件**形式保存在用户主目录，不再使用环境变�
 python -c "import sxsc_tushare as sx; sx.set_token('你的token')"
 ```
 
-**或手工创建**（Windows / Linux / macOS 通用，注意 UTF-8 无 BOM、两行）：
+**或手工创建**（仅当 SDK 不可用时；注意 UTF-8 无 BOM、两行，文件名取 `sx.set_token()` 实际写入的位置）
 
 ```bash
-# Linux / macOS（文件名随构建而变，用 TOKEN_F_P 动态拼接，勿硬编码 sxsc_tk.csv）
-python -c "import pathlib, sxsc_tushare.upass as up; p=pathlib.Path.home()/up.TOKEN_F_P; p.write_text('token\n你的token\n', encoding='utf-8'); print(p)"
+# Linux / macOS
+printf 'token\n你的token\n' > ~/sxsc_tk.csv && cat ~/sxsc_tk.csv | head -1
 ```
 
 ```powershell
-# Windows PowerShell（按实际文件名，旧构建可能是 jsdata_tk.csv）
+# Windows PowerShell
 "token`n你的token`n" | Out-File -Encoding utf8 $env:USERPROFILE\sxsc_tk.csv
 ```
 
 **验证（不打印 token 明文）：**
 
 ```bash
-python -c "import sxsc_tushare.upass as up, pathlib; p=pathlib.Path.home()/up.TOKEN_F_P; print(p, p.exists())"
 python shanxi-securities-tushare/scripts/check_env.py --check
 python sxsc-tushare-analysis/scripts/check_env.py --check  # 分析 skill 自带校验，独立安装时用它
 ```
