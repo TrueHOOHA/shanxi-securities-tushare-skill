@@ -2,29 +2,31 @@
 # -*- coding: utf-8 -*-
 """token 文件读取工具：data_api 与 check_env 的唯一实现，避免两份逻辑漂移。
 
-token 文件即 `sxsc_tushare.set_token()` 写入的位置，文件名随包构建而变
-（读 `upass.TOKEN_F_P`，例如 sxsc_tk.csv / jsdata_tk.csv），内容为
-首行表头 `token`、次行 token 值的 csv。
+token 文件即 `sxsc_tushare.set_token()` 写入的位置（当前构建为 ~/sxsc_tk.csv，旧构建可能
+为 ~/jsdata_tk.csv），内容为首行表头 `token`、次行 token 值的 csv。
+不解析 SDK 内部常量：文件名走候选列表，候选都解析不到时再由 SDK 自己读。
 """
 import os
 from typing import Optional
 
 
-def token_file_path() -> str:
-    """返回 token 文件路径。
+def token_file_candidates():
+    """token 文件候选路径（由近到旧）。
 
-    ⚠️ 文件名**不固定**：随 sxsc_tushare 构建来源而变，同为 1.2.12 也可能不同：
-      - 新版构建（如 20261030）：~/sxsc_tk.csv
-      - 旧版构建（如 20231213）：~/jsdata_tk.csv
-    因此一律读 `upass.TOKEN_F_P`，不硬编码文件名。SDK 不可用时回退为 sxsc_tk.csv。
+    `sx.set_token()` 写入的文件名随包构建而变，这里列已知名而不去读 SDK 内部常量；
+    候选都解析不到时，`data_api` / `check_env` 会退回让 `sx.get_api(env=...)` 自己读，
+    所以换构建也不会误报。
     """
-    name = None
-    try:
-        import sxsc_tushare.upass as up
-        name = getattr(up, "TOKEN_F_P", None)
-    except Exception:
-        name = None
-    return os.path.join(os.path.expanduser("~"), name or "sxsc_tk.csv")
+    home = os.path.expanduser("~")
+    return [os.path.join(home, n) for n in ("sxsc_tk.csv", "jsdata_tk.csv")]
+
+
+def token_file_path() -> str:
+    """返回实际使用的 token 文件路径：优先已存在的候选，否则主默认名（用于提示）。"""
+    for path in token_file_candidates():
+        if os.path.isfile(path):
+            return path
+    return token_file_candidates()[0]
 
 
 def _read_token_text(path: str) -> Optional[str]:

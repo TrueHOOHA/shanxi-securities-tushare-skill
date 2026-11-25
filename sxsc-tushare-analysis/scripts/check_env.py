@@ -3,9 +3,9 @@
 """
 sxsc-tushare-analysis 自带环境校验（独立运行，不依赖任何同级 skill 目录）。
 
-token 来源：**只读 token 文件**。
-文件即 `sxsc_tushare.set_token()` 写入的位置（默认 ~/sxsc_tk.csv，文件名随包构建而变，
-统一读 `upass.TOKEN_F_P` 得到），内容为 65 字节左右的 csv：首行 `token`，次行 token 值。
+token 来源：**只读 token 文件**（由 `sxsc_tushare.set_token()` 写入，当前构建为 ~/sxsc_tk.csv），
+内容为 65 字节左右的 csv：首行 `token`，次行 token 值。
+不解析 SDK 内部常量：文件名走候选列表，候选都解析不到时再由 SDK 自己读。
 
 校验项：
 1. token 文件是否可读且能解析出非空 token（必选，缺失则无法取数）
@@ -69,15 +69,27 @@ def _ensure_installed():
 def _sdk_init_error(token):
     """初始化 SDK 并做一次轻量鉴权探针；返回 None 表示可用，否则返回失败原因。
 
-    token 直接传给 get_api，**不调 set_token**，因此不会重写 token 文件。
+    不调 set_token，因此不会重写 token 文件。token 为空时退回让 SDK 自己从凭证文件读
+    （候选文件名之外的新构建也能用），并屏蔽其 stdout 噪声。
     ⚠️ get_api 只构造客户端、不校验 token；必须再调一次真实接口，否则过期/占位
     token 能通过校验，随后所有取数被静默吞掉，产出全 N/A 的报告。
     """
-    if not token:
-        return "token 未找到"
     try:
+        import contextlib
+        import io
+
         import sxsc_tushare as sx
-        api = sx.get_api(token, env="prd")
+
+        if token:
+            api = sx.get_api(token, env="prd")
+        else:
+            with contextlib.redirect_stdout(io.StringIO()):
+                api = sx.get_api(env="prd")
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return detail if token else f"token 未找到（SDK 自动读取也失败：{detail}）"
+
+    try:
         _end = datetime.now().strftime("%Y%m%d")
         _start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
         probe = api.trade_cal(exchange="SSE", start_date=_start, end_date=_end)
@@ -102,9 +114,11 @@ def run_check(install=True):
     file_exists = os.path.isfile(token_file)
     sdk_version = _sdk_version() if sdk_available else None
     sdk_init_err = _sdk_init_error(token) if sdk_available else None
+    # 文件解析不到不代表没凭证：未知构建换了文件名时 SDK 自己仍能读到，以探针为准
+    token_ok = bool(token) or (sdk_available and sdk_init_err is None)
 
     return {
-        "token_ok": bool(token),
+        "token_ok": token_ok,
         "token_file": token_file,
         "token_file_exists": file_exists,
         "token_len": len(token) if token else 0,

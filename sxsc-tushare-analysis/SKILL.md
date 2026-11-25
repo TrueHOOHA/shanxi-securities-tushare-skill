@@ -404,7 +404,7 @@ description: >
 ## 依赖
 
 - `sxsc_tushare` 库（未安装时 `pip install sxsc_tushare`，`check_env.py` 会自动尝试）
-- token 文件（默认 `~/sxsc_tk.csv`，即 `sx.set_token()` 写入位置；文件名为 `upass.TOKEN_F_P`，旧构建可能为 `jsdata_tk.csv`）
+- token 文件（`sx.set_token()` 写入的凭证文件，当前构建为 `~/sxsc_tk.csv`；不要自己 import SDK 内部模块拼路径，缺失/失效用 `scripts/check_env.py` 判定）
 - Python 3.9+ 与 `numpy` / `pandas`
 
 本 skill 不依赖同级目录下的其他 skill，可单独分发运行。

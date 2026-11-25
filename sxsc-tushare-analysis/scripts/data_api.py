@@ -188,13 +188,17 @@ class DataAPI:
 
         import sxsc_tushare as sx
 
-        # 只从 token 文件读；
-        # token 直接传给 get_api，因此不调 set_token、不重写 token 文件（只读主目录也能跑）。
+        # 只从 token 文件读；token 直接传给 get_api，因此不调 set_token、不重写 token 文件。
+        # 候选文件名都解析不到时（未知构建），退回让 SDK 自己读。
         self.token = load_token()
-        if not self.token:
-            raise RuntimeError(token_help())
         self.token_file = token_file_path()
-        self._pro = sx.get_api(self.token, env=self.env)
+        if self.token:
+            self._pro = sx.get_api(self.token, env=self.env)
+        else:
+            try:
+                self._pro = sx.get_api(env=self.env)
+            except Exception:
+                raise RuntimeError(token_help()) from None
 
     def _cap_dates(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """裁剪 end_date/trade_date 不超过 T-1（tushare 只有 T-1 数据，避免取到 T-0 占位行）。
