@@ -4,7 +4,7 @@
 
 | Skill | 职责 | 适用场景 |
 |-------|------|---------|
-| `shanxi-securities-tushare` | **数据获取**：调用 100+ 金融数据接口，批量取数并结构化交付 | 取数、导出、回测数据准备 |
+| `shanxi-securities-tushare` | **数据获取**：调用 102 个金融数据接口，批量取数并结构化交付 | 取数、导出、回测数据准备 |
 | `sxsc-tushare-analysis` | **综合分析**：自带取数层，对标的进行交叉分析并输出报告 | 分析、研究、评估、对比 |
 
 ---
@@ -25,6 +25,12 @@ https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill/
 ## 二、如果你是 Agent
 
 ### 安装
+
+0. 克隆仓库（唯一远程地址即上方 gitee）：
+
+   ```bash
+   git clone https://gitee.com/TrueHOOHA/shanxi-securities-tushare-skill.git
+   ```
 
 1. 将本项目下的 `shanxi-securities-tushare/`（数据 skill）与 `sxsc-tushare-analysis/`（分析 skill）两个文件夹复制到所使用的 Agent 工具的 `skills/` 目录下。
 
@@ -112,21 +118,23 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 > 补充说明：公告/新闻/研报/政策催化目前不属于本 skill 的直连数据能力；如用户提出该类需求，应告知限制，并建议改查价格异动、龙虎榜、资金流等可量化替代证据。
 
-### 数据覆盖（100 个接口）
+### 数据覆盖（102 个接口 / 103 份文档）
 
 | 类别 | 接口数量 |
 |------|---------|
-| A 股（含财务报表） | 45 |
-| 港股 | 6 |
+| A 股（含财务报表、市场统计） | 45 |
+| 港股（含沪深港通） | 8 |
 | 基金 | 9 |
 | 指数 | 9 |
 | 融资融券 / 转融通 | 7 |
-| 宏观 | 10 |
-| 期货 / 期权 | 9 |
-| 其他（可转债 / 外汇） | 5 |
-| **总计** | **100** |
+| 宏观 / 利率 | 10 |
+| 期货 / 期权 | 8 |
+| 其他（可转债 / 外汇） | 6 |
+| **总计** | **102** |
 
-> 按接口文档映射计；`trade_cal` 同一接口分别对应股票/期货交易日历两份文档。完整列表见 `references/API接口对应表.md`。
+> 按唯一接口名计；`trade_cal` 一个接口对应股票/期货两份文档，故 `references/` 下共 103 份接口文档（另有 `调取数据.md` 使用说明）。完整列表见 `references/API接口对应表.md`。
+>
+> 已下线并在文档中移除的接口：`cb_rate`（可转债条款，改用 `cb_issue`）、`index_member_all`（申万行业成分股，改用 `index_member`）。
 
 ### 核心原则
 
@@ -168,9 +176,9 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 
 | 标的类型 | 维度数 | 覆盖内容 |
 |---------|--------|---------|
-| 沪深股票 | 11 维 | 概况、行情趋势(含基准对比)、估值、财务质量(含业绩预告)、资金面(含大宗交易)、股东/筹码(含增减持)、两融/杠杆情绪、市场异动、解禁压力、风险提示、宏观/市场环境 |
-| 指数 | 8 维 | 概况、行情趋势、估值、成分权重、行业分布、对比(含国际指数)、两融/市场杠杆、风险提示 |
-| 公募基金 | 9 维 | 概况、净值走势、业绩指标(夏普/回撤)、同类对比、基金经理、持仓、规模变化、分红、风险提示 |
+| 沪深股票 | 11 维 | 概况、行情趋势(含基准对比)、估值、财务质量(含业绩预告)、资金面(含大宗交易)、股东/筹码(含增减持)、两融/杠杆情绪、市场异动、解禁压力、宏观/市场环境、风险提示 |
+| 指数 | 9 维 | 概况、行情趋势(含基准对比)、估值、成分权重、行业分布、两融/市场杠杆、对比(含国际指数)、动量质量(因子化)、风险提示 |
+| 公募基金 | 10 维 | 概况、净值走势、业绩指标(夏普/回撤)、同类对比、基金经理、持仓、规模变化、分红、动量质量(因子化)、风险提示 |
 | 期货 | 7 维 | 概况、行情趋势、持仓分析、主力合约、仓单库存、结算参数、风险提示 |
 
 ### 报告结构
@@ -240,6 +248,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 | `technical_indicators.py` | `calc_macd`/`calc_rsi`/`calc_kdj`/`calc_boll`/`calc_obv`/`calc_volume_ratio` |
 | `risk_modeling.py` | `calc_var_cvar`/`calc_tail_risk`/`calc_amihud_illiquidity`/`calc_rolling_beta`/`calc_rolling_sharpe`/`calc_relative_strength` |
 | `attribution.py` | `calc_beta_alpha`/`calc_piotroski_fscore` |
+| `factor_signals.py` | 纯时序单标的因子（QuantsPlaybook 研报因子）：高质量动量、振幅切割动量 A/B、CGO、VCF/ACF/PCF/TRCF 等；不依赖全市场截面，输出原始因子值而非纯净因子 |
 
 ---
 
@@ -259,7 +268,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
 │   │   ├── fin_report_demo.py                 # 财务三表示例脚本
 │   │   └── moneyflow_demo.py                  # 资金流向/龙虎榜示例脚本
 │   └── references/
-│       ├── API接口对应表.md                   # 100 个 API ↔ 文档映射（必查）
+│       ├── API接口对应表.md                   # 102 个 API ↔ 103 份文档映射（必查）
 │       ├── 调取数据.md                        # 环境配置与调用说明
 │       ├── 基础信息.md                        # stock_basic 接口文档
 │       ├── A股日线行情.md                     # daily 接口文档
@@ -280,6 +289,7 @@ python shanxi-securities-tushare/scripts/check_env.py --check  # 只校验不写
         ├── basic_metrics.py                   # 基础指标（收益率/MA/波动率/夏普等）
         ├── adjustment.py                      # 复权与归一化（adj_factor/rebase/Z-Score）
         ├── technical_indicators.py            # 技术指标（MACD/RSI/KDJ/布林带/OBV）
+        ├── factor_signals.py                  # 研报因子（动量质量/CGO/VCF 等，纯时序单标的）
         ├── risk_modeling.py                   # 风险建模（VaR/尾部风险/滚动分析/RS）
         └── attribution.py                     # 归因分析（Beta-Alpha/Piotroski/事件研究）
 ```
